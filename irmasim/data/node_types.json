@@ -1,0 +1,127 @@
+{
+  "_doc":{
+    "0":"id: unique identification of the node type in SimGrid platform",
+    "1":{
+      "1.0":"processors: set of processors inside the node",
+      "1.1":"type: type of the processor, check 'processor_types.json'",
+      "1.2":"number: total number of processors of the given type inside the node"
+    },
+    "2":{
+      "2.0":"memory-type: type of memory inside the node",
+      "2.1":"For now, only one type of memory is supported per node",
+      "2.2":"memory-capacity: total size of node's memory",
+      "2.3":"Expressed in Gigabytes (GB)"
+    }
+  },
+  "Example":{
+    "id":"example",
+    "processors":[
+      {
+        "type":"Example",
+        "number":1
+      }
+    ],
+    "memory":{
+      "type":"DDR3-1600",
+      "capacity":16
+    }
+  },
+"n1114": {
+      "id": "n1114",
+      "processors": [
+         {"type": "proc_n1114", "number": 1 }
+      ],
+      "memory": {"type": "DDR3-1600", "capacity": 32}
+   },
+   "n1134": {
+      "id": "n1134",
+      "processors": [
+         {"type": "proc_n1134", "number": 1 }
+      ],
+      "memory": {"type": "DDR3-1600", "capacity": 32}
+   },
+   "n1122": {
+      "id": "n1122",
+      "processors": [
+         {"type": "proc_n1122", "number": 1 }
+      ],
+      "memory": {"type": "DDR3-1600", "capacity": 32}
+   },
+   "n1144": {
+      "id": "n1144",
+      "processors": [
+         {"type": "proc_n1144", "number": 1 }
+      ],
+      "memory": {"type": "DDR3-1600", "capacity": 32}
+   },
+   "n1143": {
+      "id": "n1143",
+      "processors": [
+         {"type": "proc_n1143", "number": 1 }
+      ],
+      "memory": {"type": "DDR3-1600", "capacity": 32}
+   },
+   "n1154": {
+      "id": "n1154",
+      "processors": [
+         {"type": "proc_n1154", "number": 1 }
+      ],
+      "memory": {"type": "DDR3-1600", "capacity": 32}
+   },
+   "n1131": {
+      "id": "n1131",
+      "processors": [
+         {"type": "proc_n1131", "number": 1 }
+      ],
+      "memory": {"type": "DDR3-1600", "capacity": 32}
+   },
+   "n1124": {
+      "id": "n1124",
+      "processors": [
+         {"type": "proc_n1124", "number": 1 }
+      ],
+      "memory": {"type": "DDR3-1600", "capacity": 32}
+   },
+   "n1112": {
+      "id": "n1112",
+      "processors": [
+         {"type": "proc_n1112", "number": 1 }
+      ],
+      "memory": {"type": "DDR3-1600", "capacity": 32}
+   },
+   "n1132": {
+      "id": "n1132",
+      "processors": [
+         {"type": "proc_n1132", "number": 1 }
+      ],
+      "memory": {"type": "DDR3-1600", "capacity": 32}
+   },
+   "n1141": {
+      "id": "n1141",
+      "processors": [
+         {"type": "proc_n1141", "number": 1 }
+      ],
+      "memory": {"type": "DDR3-1600", "capacity": 32}
+   },
+   "n1152": {
+      "id": "n1152",
+      "processors": [
+         {"type": "proc_n1152", "number": 1 }
+      ],
+      "memory": {"type": "DDR3-1600", "capacity": 32}
+   },
+   "n1113": {
+      "id": "n1113",
+      "processors": [
+         {"type": "proc_n1113", "number": 1 }
+      ],
+      "memory": {"type": "DDR3-1600", "capacity": 32}
+   },
+   "n1142": {
+      "id": "n1142",
+      "processors": [
+         {"type": "proc_n1142", "number": 1 }
+      ],
+      "memory": {"type": "DDR3-1600", "capacity": 32}
+   }
+}

@@ -1,0 +1,28 @@
+{
+   "platform": {
+      "the_platform": {
+         "id": "the_platform",
+         "model_name" : "modelV2",
+         "clusters": [
+            { "id": "labatc",
+               "nodes": [
+                  { "id": "n1112", "type": "fast", "number": 1 },
+                  { "id": "n1113", "type": "slow", "number": 1 }
+               ]
+            }
+         ]
+      }
+   },
+   "node": {
+      "slow": {
+         "id": "slow",
+         "cores": 4, "clock_rate": 1.7,
+         "abb": -92.130488, "aba": 0, "aab": 0, "aaa": 0, "bbb": 1, "bba": 0, "bab": 0, "baa": 0, "ccb": 1, "cca": -0.004, "cbb":  14.7, "cba": -19.8, "cab": -815, "caa": 495, "dbb": 0.0186, "dba": 0, "dab": 0.7, "daa": 0,
+         "p11": 0.596069, "p02": -0.006362, "pidle": 1, "p01": 1.374746, "p10": 18.848542, "p00": 1.997208, "p20": -24.348324 },
+      "fast": {
+         "id": "fast",
+         "cores": 4, "clock_rate": 3.4,
+         "abb": -92.130488, "aba": 0, "aab": 0, "aaa": 0, "bbb": 1, "bba": 0, "bab": 0, "baa": 0, "ccb": 1, "cca": -0.004, "cbb":  14.7, "cba": -19.8, "cab": -815, "caa": 495, "dbb": 0.0186, "dba": 0, "dab": 0.7, "daa": 0,
+         "p00": 4.457061, "p01": 4.289798, "p10": 199.593202, "p11": -1.749876, "p02": -0.012149, "p20": -1729.219034, "pidle": 0.957001 }
+   }
+}

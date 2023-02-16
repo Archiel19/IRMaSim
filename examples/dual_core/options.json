@@ -1,0 +1,5 @@
+{
+    "platform_name": "example",
+    "platform_file": "platform.json",
+    "workload_file": "jobs.json"
+}
