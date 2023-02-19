@@ -1,6 +1,9 @@
 import importlib
 import logging
+import torch
 from irmasim.workload_manager.WorkloadManager import WorkloadManager
+from irmasim.workload_manager.EnergyEnvironment import EnergyEnvironment
+from irmasim.workload_manager.agent.EnergyActorCritic import EnergyActorCritic
 from irmasim.Options import Options
 from irmasim.Task import Task
 from typing import TYPE_CHECKING
@@ -26,9 +29,12 @@ class EnergyWM(WorkloadManager):
         self.running_jobs = []
         self.last_time = 0
 
-        # TODO DRL-specific attributes
-        # self.environment = Environment(self, simulator)
-        # self.agent, self.optimizer = self.create_agent()
+        # DRL-related attributes
+        self.environment = EnergyEnvironment(self, simulator)
+        # TODO: the sizes
+        self.agent = EnergyActorCritic(self.environment.actions_size[0],
+                                       self.environment.observation_size[0])
+        self.observation = self.environment.reset()[0]
 
     def on_job_submission(self, jobs: list):
         self.pending_jobs += jobs
@@ -59,10 +65,36 @@ class EnergyWM(WorkloadManager):
         task.allocate(self.resources[resource][0])
 
     def on_end_step(self):
-        self.last_time = self.simulator.simulation_time
+        if self._can_schedule():
+            self.last_time = self.simulator.simulation_time
+            action, value, logp = self.agent.decide(self.observation)
+            self.observation, reward, _, _, _ = self.environment.step(action)
+            self.agent.buffer.store(self.observation, action, reward, value, logp)
+
+    def _can_schedule(self):  # TODO: figure out how this works
+        for job in self.pending_jobs[:self.environment.NUM_JOBS]:
+            if job.ntasks <= max(self.resources, key=lambda node: node.count_idle_cores()):
+                return True
+        return False
 
     def on_end_trajectory(self):
-        pass
+        logging.getLogger('irmasim').debug(f'{self.simulator.simulation_time} - Ending trajectory')
+        self.agent.on_end_trajectory()
 
     def on_end_simulation(self):
-        pass
+        phase = self.options['workload_manager']['agent']['phase']
+        out_dir = self.options['output_dir']
+        if phase == 'train':
+            # Compute losses
+            losses = self.agent.training_step()  # TODO this, check if f'' needed
+            with open(f'{out_dir}', 'a+') as out_f:
+                out_f.write(f'{losses[0]}, {losses[1]}\n')
+            if 'output_model' in self.options['workload_manager']['agent']:
+                out_model = self.options['workload_manager']['agent']['output_model']
+                print(f"Writing model to {out_model}")
+                torch.save({
+                    'model_state_dict': self.agent.state_dict(),
+                    'optimizer_state_dict': self.optimizers.state_dict()
+                }, out_model)
+        with open(f'{out_dir}/rewards.log', 'a+') as out_f:
+            out_f.write(f'{self.agent.total_rewards}\n')
