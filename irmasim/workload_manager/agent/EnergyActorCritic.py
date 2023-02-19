@@ -1,4 +1,5 @@
 import numpy as np
+import random
 from typing import Tuple, Any
 
 from irmasim.Options import Options
@@ -11,9 +12,13 @@ from torch.distributions import Categorical
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # TODO: can a trajectory end before trajectory_length steps?
+# TODO: where require_grad=True?
+
 
 class EnergyActorCritic:
-    def __init__(self, actions_size: int, observation_size: int, gamma=0.99, lam=0.97, load_agent: bool = True):
+    def __init__(self, actions_size: int, observation_size: int, load_agent: bool = True):
+
+        random.seed(3)  # TODO in options maybe
         self.agent_options = Options().get()['workload_manager']['agent']
 
         self.actor = EnergyActorCritic.Actor(observation_size)
@@ -29,8 +34,7 @@ class EnergyActorCritic:
             self.train_pi_iters = self.agent_options['train_pi_iters']
             self.train_v_iters = self.agent_options['train_v_iters']
 
-        self.buffer = EnergyActorCritic.PPOBuffer(actions_size, observation_size,
-                                                  self.agent_options['trajectory_length'],
+        self.buffer = EnergyActorCritic.PPOBuffer(self.agent_options['trajectory_length'],
                                                   self.agent_options['nbtrajectories'])
 
         if 'input_model' in self.agent_options \
@@ -40,7 +44,15 @@ class EnergyActorCritic:
             print(f'Reading model to {in_model}')
             checkpoint = torch.load(in_model)
             self.load_state_dict(checkpoint['model_state_dict'])
-            # TODO: load an existing model, train or eval?
+            self.actor_optimizer.load_state_dict(checkpoint['optimizer_state_dict']['pi'])
+            self.critic_optimizer.load_state_dict(checkpoint['optimizer_state_dict']['v'])
+            # TODO: load an existing model, train or eval? Also something with the optimizers
+
+    def decide(self, observation: torch.Tensor) -> tuple:
+        with torch.no_grad():  # We don't want to compute gradients for a forward pass
+            action, logp_action, _ = self.actor.forward(observation.to(DEVICE))
+            value = self.critic.forward(observation.to(DEVICE))
+        return action, value, logp_action
 
     def state_dict(self):
         return {
@@ -52,84 +64,80 @@ class EnergyActorCritic:
         self.actor.load_state_dict(state_dict['actor'])
         self.critic.load_state_dict(state_dict['critic'])
 
+    @property
+    def total_rewards(self):
+        return self.buffer.total_rewards
+
     def on_end_trajectory(self):
-        # Compute advantages and rewards-to-go
-        rewards = self.buffer.get_current_batch('rew')
-        values = self.buffer.get_current_batch('val')
-        values.append(0)  # This acts as our mask to avoid taking into account the last value
+        self.buffer.on_end_trajectory(self.gamma, self.lam)
 
-        def discounted_sum(array, discount):
-            # Based on https://stackoverflow.com/questions/47970683/vectorize-a-numpy-discount-calculation
-            y = lfilter([1], [1, -discount], x=array[::-1])
-            return y[::-1]  # Reversed?
-
-        # TODO understand this completely
-        deltas = rewards + (self.gamma * values[1:]) - values[:-1]
-        advantages = discounted_sum(deltas, self.gamma * self.lam)
-        expected_returns = discounted_sum(rewards, self.gamma)
-
-        self.buffer.batch_store('adv', advantages)
-        self.buffer.batch_store('ret', expected_returns)
-
-        # Advance to next row in buffer
-        self.buffer.advance_trajectory()
-
-        """
-        for t in reversed(range(trajectory_length)):  # TODO mask
-            mask = 0 if t == trajectory_length else 1
-            delta = rewards[t] + (self.gamma * values[t + 1] * mask) - values[t]
-            advantages[t] = delta + (self.gamma * self.lam * advantages[t + 1] * mask)
-            #delta = rewards[i] + self.gamma * values[i + 1] - values[i]
-            #gae = delta + self.gamma * self.lam * gae
-            #returns.insert(0, gae + values[i])
-
-        adv = np.array(returns) - values[:-1]
-        """
-
-    def training_step(self):
+    def training_step(self, num_minibatches=32, val_factor=0.85, h_factor=0.08):  # TODO in options
         """
         Training step, executed after each simulation
+
+        Based on the code of the guy who did his master's thesis on PPO,
+        and on ActionActorCritic
         """
+        num_samples = self.buffer.capacity
+        assert num_samples % num_minibatches == 0
+        minibatch_size = num_samples // num_minibatches
 
         # Normalize advantages, reset buffer and collect data
-        training_data = self.buffer.simulation_end()
+        training_data = self.buffer.on_end_simulation()
+        losses = np.zeros((self.train_pi_iters, 3), dtype=np.float32)
 
-        # Train actor and critic using collected data (sampled in minibatches)
+        def next_minibatch():
+            for i in range(0, num_samples, minibatch_size):
+                m = {}
+                for k in ['obs', 'act', 'rew', 'val', 'logp', 'adv', 'ret']:
+                    m[k] = training_data[k][i:i+minibatch_size]
 
-        for i in range(self.train_pi_iters):
-            loss = 0  # TODO
-            self.actor_optimizer.zero_grad()
+                # Think of this as a static variable in C/C++
+                next_minibatch.counter += minibatch_size
+                yield m
+        next_minibatch.counter = 0  # Can't be initialized inside the function
 
+        for epoch in range(self.train_pi_iters):  # TODO entropy
+            for minibatch in next_minibatch():
+                self.actor_optimizer.zero_grad()
+                self.critic_optimizer.zero_grad()
 
-        # Train critic
+                loss_pi = self.actor.loss(minibatch)
+                loss_v = self.critic.loss(minibatch)
+                _, _, entropy = self.actor.forward(minibatch['obs'])
+                final_loss = loss_pi + val_factor * loss_v - h_factor * entropy
+                final_loss.backward()
 
-    def decide(self, observation: torch.Tensor) -> tuple:
-        with torch.no_grad():  # We don't want to compute gradients for a forward pass
-            action, logp_action = self.actor.forward(observation.to(DEVICE))
-            value = self.critic.forward(observation.to(DEVICE))
-        return action, value, logp_action
+                self.actor_optimizer.step()
+                self.critic_optimizer.step()
+
+                losses[epoch][0] = loss_pi.item()
+                losses[epoch][1] = loss_v.item()
+                losses[epoch][2] = final_loss.item()
+
+        return np.mean(losses, axis=0)
 
     class PPOBuffer:
-        # TODO: polish this to make it more modular and maintainable
-        def __init__(self, actions_size, observation_size, trajectory_length, nbtrajectories):
+        def __init__(self, trajectory_length, nbtrajectories):
             self.trajectory_length = trajectory_length
             self.nbtrajectories = nbtrajectories
-
-            self.obs = np.zeros((nbtrajectories, trajectory_length, observation_size), dtype=np.float32)
-            self.act = np.zeros((nbtrajectories, trajectory_length, actions_size), dtype=np.float32)
-
+            self.obs = np.zeros((nbtrajectories, trajectory_length), dtype=np.float32)
+            self.act = np.zeros((nbtrajectories, trajectory_length), dtype=np.float32)
             self.rew = np.zeros((nbtrajectories, trajectory_length), dtype=np.float32)
             self.val = np.zeros((nbtrajectories, trajectory_length), dtype=np.float32)
             self.logps = np.zeros((nbtrajectories, trajectory_length), dtype=np.float32)
-
             self.adv = np.zeros((nbtrajectories, trajectory_length), dtype=np.float32)
             self.ret = np.zeros((nbtrajectories, trajectory_length), dtype=np.float32)
-
             self.dict = {'obs': self.obs, 'act': self.act, 'rew': self.rew, 'val': self.val,
                          'logps': self.logps, 'adv': self.adv, 'ret': self.ret}
 
             self.traj_idx = 0
             self.timestep = 0
+            self.total_rewards = 0
+
+        @property
+        def capacity(self):
+            return self.trajectory_length * self.nbtrajectories
 
         def store(self, observation, action, reward, value, logp):
             self.obs[self.traj_idx][self.timestep] = observation
@@ -139,36 +147,72 @@ class EnergyActorCritic:
             self.logps[self.traj_idx][self.timestep] = logp
             self.timestep += 1
 
-        def batch_store(self, key, batch_values):
-            """
-            Stores at current trajectory index
-            """
-            self.dict[key][self.traj_idx] = batch_values
+        def on_end_trajectory(self, gamma, lam) -> None:
+            assert self.timestep == self.trajectory_length
 
-        def advance_trajectory(self):
+            # Compute advantages and rewards-to-go
+            rewards = self.rew[self.traj_idx]
+            self.total_rewards = np.sum(rewards)
+            values = self.val[self.traj_idx]
+            values.append(0)  # This acts as our mask to avoid taking into account the last value
+
+            def discounted_sum(array, discount):
+                # Based on https://stackoverflow.com/questions/47970683/vectorize-a-numpy-discount-calculation
+                y = lfilter([1], [1, -discount], x=array[::-1])
+                return y[::-1]  # Reversed?
+
+            # TODO understand this completely
+            deltas = rewards + (gamma * values[1:]) - values[:-1]
+            advantages = discounted_sum(deltas, gamma * lam)
+            expected_returns = discounted_sum(rewards, gamma)
+
+            self.adv[self.traj_idx] = advantages
+            self.ret[self.traj_idx] = expected_returns
+
+            # Advance to next row
             self.traj_idx += 1
             self.timestep = 0
 
-        def get_current_batch(self, key: str) -> np.array:
-            # Only finished batches can be accesed
-            assert self.timestep == self.trajectory_length
-            return self.dict[key][self.traj_idx]
+            """
+            for t in reversed(range(trajectory_length)):  # TODO mask
+                mask = 0 if t == trajectory_length else 1
+                delta = rewards[t] + (self.gamma * values[t + 1] * mask) - values[t]
+                advantages[t] = delta + (self.gamma * self.lam * advantages[t + 1] * mask)
+                #delta = rewards[i] + self.gamma * values[i + 1] - values[i]
+                #gae = delta + self.gamma * self.lam * gae
+                #returns.insert(0, gae + values[i])
 
-        def simulation_end(self) -> np.array:
+            adv = np.array(returns) - values[:-1]
+            """
+
+        def on_end_simulation(self) -> dict:
             """
             Reset and normalize advantages
 
-            Returns collected data as an array of tuples
+            Returns collected data
             """
+            assert self.traj_idx == self.nbtrajectories
+
+            # Reset
             self.traj_idx = 0
             self.timestep = 0
+
+            # Normalize advantages
             adv_mean = np.mean(self.adv)
             adv_std = np.std(self.adv)
             self.adv = (self.adv - adv_mean) / adv_std
 
-            for
-            return {k: torch.as_tensor(np.squeeze(v, dim=0), device=DEVICE) for k, v in self.dict}
+            # Create shuffled list of samples
+            # Flatten outer dimension and shuffle each array the same way
+            sample_dict = {}
+            seed = random.random()
+            for k, v in self.dict.items():
+                arr = v.reshape(-1, v.shape[-1])
+                np.random.seed(seed)
+                np.random.shuffle(arr)  # TODO quite expensive, right?
+                sample_dict[k] = torch.as_tensor(arr, dtype=torch.float32, device=DEVICE)
 
+            return sample_dict
 
     class Actor(nn.Module):
         def __init__(self, observation_size):
@@ -178,7 +222,7 @@ class EnergyActorCritic:
             self.hidden_1 = nn.Linear(16, 8, device=DEVICE)
             self.output = nn.Linear(8, 1, device=DEVICE)
 
-        def forward(self, observation: torch.Tensor) -> Tuple[Any, Any]:
+        def forward(self, observation: torch.Tensor, act=None) -> Tuple[Any, Any, Any]:
             # TODO: investigate how the mask works and so on
             mask = torch.where(observation.sum(dim=-1) != 0.0, 1.0, 0.0)
             out_0 = nn.functional.leaky_relu(self.input(observation))
@@ -189,8 +233,20 @@ class EnergyActorCritic:
             # TODO: check how the distribution looks, might need to normalize
 
             pi = Categorical(logits=out)
-            action = pi.sample()
-            return action, pi.log_prob(action)
+            action = pi.sample() if act is not None else act
+            return action, pi.log_prob(action), pi.entropy()
+
+        def loss(self, minibatch: dict, epsilon=0.2):  # TODO in options?
+            obs = minibatch['obs']
+            act = minibatch['act']
+            adv = minibatch['adv']
+            logp_old = minibatch['logp']
+
+            _, logp, _ = self.forward(obs, act)
+            ratio = torch.exp(logp - logp_old)
+            clipped = torch.clip(ratio, 1.0 - epsilon, 1.0 + epsilon) * adv
+            loss = torch.minimum(ratio * adv, clipped)
+            return -torch.mean(loss)
 
     class Critic(nn.Module):
         def __init__(self, actions_size, observation_size):
@@ -219,3 +275,9 @@ class EnergyActorCritic:
             out_1_3 = nn.functional.leaky_relu(self.hidden_1_2(out_1_2))
 
             return self.output(out_1_3)
+
+        def loss(self, minibatch: dict):
+            obs = minibatch['obs']
+            ret = minibatch['ret']
+            loss = torch.nn.MSELoss()
+            return loss(self.forward(obs), ret)

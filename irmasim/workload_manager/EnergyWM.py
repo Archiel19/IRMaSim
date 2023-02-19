@@ -80,6 +80,7 @@ class EnergyWM(WorkloadManager):
     def on_end_trajectory(self):
         logging.getLogger('irmasim').debug(f'{self.simulator.simulation_time} - Ending trajectory')
         self.agent.on_end_trajectory()
+        # TODO when is the environment reset?
 
     def on_end_simulation(self):
         phase = self.options['workload_manager']['agent']['phase']
@@ -94,7 +95,8 @@ class EnergyWM(WorkloadManager):
                 print(f"Writing model to {out_model}")
                 torch.save({
                     'model_state_dict': self.agent.state_dict(),
-                    'optimizer_state_dict': self.optimizers.state_dict()
+                    'optimizer_state_dict': {'pi': self.agent.actor_optimizer.state_dict(),
+                                             'v': self.agent.critic_optimizer.state_dict()}
                 }, out_model)
         with open(f'{out_dir}/rewards.log', 'a+') as out_f:
             out_f.write(f'{self.agent.total_rewards}\n')
