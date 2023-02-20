@@ -16,13 +16,14 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class EnergyActorCritic:
-    def __init__(self, actions_size: int, observation_size: int, load_agent: bool = True):
+    def __init__(self, actions_size: tuple, observation_size: tuple, load_agent: bool = True):
 
         random.seed(3)  # TODO in options maybe
+        options = Options().get()
         self.agent_options = Options().get()['workload_manager']['agent']
 
-        self.actor = EnergyActorCritic.Actor(observation_size)
-        self.critic = EnergyActorCritic.Critic(actions_size, observation_size)
+        self.actor = EnergyActorCritic.Actor(observation_size[1])
+        self.critic = EnergyActorCritic.Critic(actions_size[0], observation_size[1])  # TODO figure this out
 
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=float(self.agent_options['lr_pi']))
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=float(self.agent_options['lr_v']))
@@ -34,8 +35,8 @@ class EnergyActorCritic:
             self.train_pi_iters = self.agent_options['train_pi_iters']
             self.train_v_iters = self.agent_options['train_v_iters']
 
-        self.buffer = EnergyActorCritic.PPOBuffer(self.agent_options['trajectory_length'],
-                                                  self.agent_options['nbtrajectories'])
+        self.buffer = EnergyActorCritic.PPOBuffer(options['trajectory_length'],
+                                                  options['nbtrajectories'])
 
         if 'input_model' in self.agent_options \
                 and path.isfile(self.agent_options['input_model']) \
@@ -225,6 +226,7 @@ class EnergyActorCritic:
         def forward(self, observation: torch.Tensor, act=None) -> Tuple[Any, Any, Any]:
             # TODO: investigate how the mask works and so on
             mask = torch.where(observation.sum(dim=-1) != 0.0, 1.0, 0.0)
+            print(f'actor mask: {mask}')
             out_0 = nn.functional.leaky_relu(self.input(observation))
             out_1 = nn.functional.leaky_relu(self.hidden_0(out_0))
             out_2 = nn.functional.leaky_relu(self.hidden_1(out_1))
@@ -233,7 +235,9 @@ class EnergyActorCritic:
             # TODO: check how the distribution looks, might need to normalize
 
             pi = Categorical(logits=out)
-            action = pi.sample() if act is not None else act
+            print(f'Distribution: {pi.logits}')
+            action = pi.sample() if act is None else act
+            print(f'Action: {action}')
             return action, pi.log_prob(action), pi.entropy()
 
         def loss(self, minibatch: dict, epsilon=0.2):  # TODO in options?
@@ -264,11 +268,21 @@ class EnergyActorCritic:
             self.output = nn.Linear(8, 1, device=DEVICE)
 
         def forward(self, observation: torch.Tensor) -> torch.Tensor:
+            print(f'Critic observation: {observation}, shape: {observation.shape}')
             out_0_0 = nn.functional.leaky_relu(self.input(observation))
             out_0_1 = nn.functional.leaky_relu(self.hidden_0_0(out_0_0))
             out_0_2 = nn.functional.leaky_relu(self.hidden_0_1(out_0_1))
             out_0_3 = nn.functional.leaky_relu(self.hidden_0_2(out_0_2))
             out_1 = torch.squeeze(out_0_3)
+            print(f'Critic out_0_0 shape: {out_0_0.shape}')
+            # print(out_0_0)
+            print(f'Critic out_0_1 shape: {out_0_1.shape}')
+            # print(out_0_1)
+            print(f'Critic out_0_2 shape: {out_0_2.shape}')
+            # print(out_0_2)
+            print(f'Critic out_0_3 shape: {out_0_3.shape}')
+            # print(out_0_3)
+            print(f'Critic out_1 shape: {out_1.shape}')
 
             out_1_1 = nn.functional.leaky_relu(self.hidden_1_0(out_1))
             out_1_2 = nn.functional.leaky_relu(self.hidden_1_1(out_1_1))

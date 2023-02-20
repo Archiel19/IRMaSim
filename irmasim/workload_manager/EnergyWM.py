@@ -32,12 +32,15 @@ class EnergyWM(WorkloadManager):
         # DRL-related attributes
         self.environment = EnergyEnvironment(self, simulator)
         # TODO: the sizes
-        self.agent = EnergyActorCritic(self.environment.actions_size[0],
-                                       self.environment.observation_size[0])
+        self.agent = EnergyActorCritic(self.environment.actions_size,
+                                       self.environment.observation_size)
         self.observation = self.environment.reset()[0]
 
     def on_job_submission(self, jobs: list):
         self.pending_jobs += jobs
+        print('Pending jobs [Workload Manager]')
+        for j in self.pending_jobs:
+            print(j)
 
     def on_job_completion(self, jobs: list):
         for job in jobs:
@@ -73,7 +76,7 @@ class EnergyWM(WorkloadManager):
 
     def _can_schedule(self):  # TODO: figure out how this works
         for job in self.pending_jobs[:self.environment.NUM_JOBS]:
-            if job.ntasks <= max(self.resources, key=lambda node: node.count_idle_cores()):
+            if job.ntasks <= max([node.count_idle_cores() for node in self.resources]):
                 return True
         return False
 
