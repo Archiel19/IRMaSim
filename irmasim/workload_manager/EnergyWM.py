@@ -5,7 +5,6 @@ from irmasim.workload_manager.WorkloadManager import WorkloadManager
 from irmasim.workload_manager.EnergyEnvironment import EnergyEnvironment
 from irmasim.workload_manager.agent.EnergyActorCritic import EnergyActorCritic
 from irmasim.Options import Options
-from irmasim.Task import Task
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -31,16 +30,11 @@ class EnergyWM(WorkloadManager):
 
         # DRL-related attributes
         self.environment = EnergyEnvironment(self, simulator)
-        # TODO: the sizes
         self.agent = EnergyActorCritic(self.environment.actions_size,
                                        self.environment.observation_size)
-        self.observation = self.environment.reset()[0]
 
     def on_job_submission(self, jobs: list):
         self.pending_jobs += jobs
-        print('Pending jobs [Workload Manager]')
-        for j in self.pending_jobs:
-            print(j)
 
     def on_job_completion(self, jobs: list):
         for job in jobs:
@@ -48,31 +42,17 @@ class EnergyWM(WorkloadManager):
                 f"{self.simulator.simulation_time} {job.name} finished")
             self.running_jobs.remove(job)
 
-    # TODO The following two have been taken from NodeWM, make sure to understand what this function does wrt the sim
-    def schedule_next_job(self):
-        if self.pending_jobs and max([resource[1] for resource in self.resources]) > 0:
-            next_job = self.pending_jobs.pop(0)
-            for task in next_job.tasks:
-                self.allocate(task)
-            self.simulator.schedule(next_job.tasks)
-            self.running_jobs.append(next_job)
-            return True
-        else:
-            return False
-
-    def allocate(self, task: Task):
-        resource = 0
-        while self.resources[resource][1] == 0:
-            resource += 1
-        self.resources[resource][1] -= 1
-        task.allocate(self.resources[resource][0])
-
     def on_end_step(self):
         if self._can_schedule():
-            self.last_time = self.simulator.simulation_time
-            action, value, logp = self.agent.decide(self.observation)
-            self.observation, reward, _, _, _ = self.environment.step(action)
-            self.agent.buffer.store(self.observation, action, reward, value, logp)
+            self.agent.reward_last_action(self.environment.reward())
+            self.last_time = self.simulator.simulation_time  # Can't be called before reward_last_action
+            observation = self.environment.get_obs()
+            action, value, logp = self.agent.decide(observation)
+            self.environment.apply_action(action)
+
+            # Rewards can only be computed after the simulator has applied the action,
+            # so there's a separate function in the agent to reward the last taken action
+            self.agent.buffer.store(observation, action, value, logp)
 
     def _can_schedule(self):  # TODO: figure out how this works
         for job in self.pending_jobs[:self.environment.NUM_JOBS]:
@@ -81,8 +61,9 @@ class EnergyWM(WorkloadManager):
         return False
 
     def on_end_trajectory(self):
+        self.last_time = 0
         logging.getLogger('irmasim').debug(f'{self.simulator.simulation_time} - Ending trajectory')
-        self.agent.on_end_trajectory()
+        self.agent.on_end_trajectory(self.environment.reward())
         # TODO when is the environment reset?
 
     def on_end_simulation(self):
@@ -91,7 +72,7 @@ class EnergyWM(WorkloadManager):
         if phase == 'train':
             # Compute losses
             losses = self.agent.training_step()  # TODO this, check if f'' needed
-            with open(f'{out_dir}', 'a+') as out_f:
+            with open(f'{out_dir}/losses.log', 'a+') as out_f:
                 out_f.write(f'{losses[0]}, {losses[1]}\n')
             if 'output_model' in self.options['workload_manager']['agent']:
                 out_model = self.options['workload_manager']['agent']['output_model']
