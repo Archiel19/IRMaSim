@@ -4,7 +4,7 @@
   "workload_file": "kit_64l4s_2.5GHz_50w-75w.json",
   "platform_file": "kit_platform_1984.json",
   "platform_name": "the_platform",
-  "output_dir": "results",
+  "output_dir": "test",
   "workload_manager": {
     "type": "EnergyWM",
     "environment": {
@@ -18,14 +18,13 @@
       "name": "EnergyActorCritic",
       "gamma": 0.99,
       "lambda": 0.95,
-      "lr_pi": 0.0003,
-      "lr_v": 0.001,
+      "lr_pi": 0.00035,
+      "lr_v": 0.0015,
       "phase": "train",
-      "train_pi_iters": 50,
-      "train_v_iters": 50
+      "train_iters": 80
     }
   },
   "nbtrajectories": 5,
-  "trajectory_length": 512,
-  "trajectory_origin": "random"
+  "trajectory_length": 100,
+  "trajectory_origin": 0
 }
