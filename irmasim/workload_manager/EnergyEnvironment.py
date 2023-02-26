@@ -27,10 +27,11 @@ class EnergyEnvironment(gym.Env):
     - Wait time
 
     Node attributes:
+    - Total processors (why? I'm not going to use this one)
+    - Free processors
     - Static power
     - Dynamic power
     - Clock rate
-    - Can be scheduled
     """
 
     def step(self, action: ActType) -> Tuple[ObsType, float, bool, bool, dict]:
@@ -44,14 +45,11 @@ class EnergyEnvironment(gym.Env):
         env_options = self.options["workload_manager"]["environment"]
         self.NUM_JOBS = env_options["num_jobs"]
         self.NUM_NODES = env_options["num_nodes"]
-        self.OBS_FEATURES = env_options["obs_features"]
+        self.OBS_FEATURES = 7
 
         mod = importlib.import_module("irmasim.platform.models." + self.options["platform_model_name"] + ".Node")
         klass = getattr(mod, 'Node')
         self.resources = self.simulator.get_resources(klass)
-
-        mod = importlib.import_module('irmasim.platform.models.' + self.options['platform_model_name'] + '.Core')
-        self.core_klass = getattr(mod, 'Core')
 
         # Set reward function
         reward_dict = {
@@ -74,58 +72,79 @@ class EnergyEnvironment(gym.Env):
                                                 dtype=np.float32)
 
     def get_obs(self) -> torch.Tensor:
-        # TODO make my version
-        mod = importlib.import_module("irmasim.platform.models." + self.options["platform_model_name"] + ".Core")
-        klass = getattr(mod, 'Core')
+        """
+        Job attributes: (stay the same)
+        - Number of requested processors (cores?)
+        - Requested time
+        - Wait time
+
+        Node attributes:
+        - Free processors
+        - Static power
+        - Dynamic power
+        - Clock rate
+        """
+        # TODO my version
         observation = []
         for job in self.workload_manager.pending_jobs[:self.NUM_JOBS]:
             wait_time = self.simulator.simulation_time - job.submit_time
             req_time = job.req_time
-            req_core = job.ntasks
-            job_obs = [wait_time, req_time, req_core]
+            req_cores = job.ntasks
+            job_obs = [wait_time, req_time, req_cores]
 
             for node in self.resources:
-                core_list = node.enumerate_resources(klass)
-                available_core_list = []
+                core_list = node.cores()
+                available_cores = 0
                 clock_rate_sum = 0
-                for core in core_list:
+
+                # TODO this is actually implemented in Processor.py, maybe use that instead
+                static_power = 0
+                idle_power = 0
+                dynamic_power = 0
+
+                for core in node.cores():
                     clock_rate_sum += core.clock_rate
+                    idle_power += core.min_power * core.static_power
+                    static_power += core.static_power
                     if core.task is None:
-                        available_core_list.append(core)
+                        available_cores += 1
+                    else:
+                        dynamic_power += core.dynamic_power
+
                 avg_clock_rate = clock_rate_sum / len(core_list)
-                if req_core <= len(available_core_list):
-                    observation.append(job_obs + [len(core_list), len(available_core_list), avg_clock_rate,
-                                                  int(req_core <= len(available_core_list))])
+
+                if req_cores <= available_cores:
+                    if available_cores == len(core_list):
+                        static_power = idle_power
+                    observation.append(job_obs + [available_cores, static_power, dynamic_power, avg_clock_rate])
                 else:
-                    observation.append([0] * 7)
+                    observation.append([0] * self.OBS_FEATURES)
 
         num_fill_jobs = self.actions_size[0] - len(observation)
         # No pad on top, pad 'num_fill_jobs' to the bottom, no pad left nor right
         return torch.Tensor(np.pad(observation, [(0, num_fill_jobs), (0, 0)]))
 
     def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
-        # TODO?
-        return self.get_obs(), {}
+        pass
 
     def render(self) -> Optional[Union[RenderFrame, List[RenderFrame]]]:
         pass
 
-    def apply_action(self, action: ActType) -> None:
+    def apply_action(self, action: ActType, pending_jobs, running_jobs) -> None:
         # Apply action
         job_idx, node_idx = self._get_action_pair(action)
         logging.getLogger("irmasim").debug(
             f"{self.simulator.simulation_time} performing action Job({job_idx})-Node({node_idx}) ({action})")
 
-        job, node = self.workload_manager.pending_jobs.pop(job_idx), self.resources[node_idx]
-        free_cores = [core for core in node.enumerate_resources(self.core_klass) if core.task is None]
+        job, node = pending_jobs.pop(job_idx), self.resources[node_idx]
+        free_cores = [core for core in node.cores() if core.task is None]
 
         # print(f'free cores: {len(free_cores)}, job ntasks: {job.ntasks}')
         assert len(free_cores) >= job.ntasks
         for task in job.tasks:
             task.allocate(free_cores.pop(0).full_id())
         self.simulator.schedule(job.tasks)
-        self.workload_manager.running_jobs.append(job)  # TODO: modularity
+        running_jobs.append(job)
 
     def _energy_consumption_reward(self) -> float:
         delta_time = self.simulator.simulation_time - self.workload_manager.last_time
