@@ -7,13 +7,11 @@ def plot_losses(exp_dir: str):
     with open(f'{exp_dir}/losses.log', 'r') as l_f:
         losses_pairs = [tuple(map(float, lp.strip().split(','))) for lp in l_f.readlines()]
 
-    plt.plot([l[0] for l in losses_pairs])
-    plt.savefig(f'{exp_dir}/pi_loss.png')
-    plt.clf()
-
-    plt.plot([l[1] for l in losses_pairs])
-    plt.savefig(f'{exp_dir}/v_loss.png')
-    plt.clf()
+    losses = ['pi', 'v', 'total']
+    for i in range(len(losses)):
+        plt.plot([l[i] for l in losses_pairs])
+        plt.savefig(f'{exp_dir}/{losses[i]}_loss.png')
+        plt.clf()
 
 
 def plot_rewards(exp_dir: str):

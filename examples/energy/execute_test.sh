@@ -1,4 +1,4 @@
-mkdir -p results
-rm -f test/*
-irmasim -nr 20 -im agent.model --phase test options_test.json
-python ../plotter.py -d new/test -r
+rm -f agent.model test/*
+mkdir -p test
+irmasim -nr 30 -im agent.model -om agent.model options_test.json
+python3.9 plotter.py -d test -r -l
