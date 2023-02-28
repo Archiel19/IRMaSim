@@ -48,13 +48,13 @@ class EnergyWM(WorkloadManager):
             self.last_time = self.simulator.simulation_time  # Can't be called before reward_last_action
             observation = self.environment.get_obs()
             action, value, logp = self.agent.decide(observation)
-            self.environment.apply_action(action)
+            self.environment.apply_action(action, self.pending_jobs, self.running_jobs)
 
             # Rewards can only be computed after the simulator has applied the action,
             # so there's a separate function in the agent to reward the last taken action
             self.agent.buffer.store(observation, action, value, logp)
 
-    def _can_schedule(self):  # TODO: figure out how this works
+    def _can_schedule(self):
         for job in self.pending_jobs[:self.environment.NUM_JOBS]:
             if job.ntasks <= max([node.count_idle_cores() for node in self.resources]):
                 return True
@@ -64,16 +64,15 @@ class EnergyWM(WorkloadManager):
         self.last_time = 0
         logging.getLogger('irmasim').debug(f'{self.simulator.simulation_time} - Ending trajectory')
         self.agent.on_end_trajectory(self.environment.reward())
-        # TODO when is the environment reset?
 
     def on_end_simulation(self):
         phase = self.options['workload_manager']['agent']['phase']
         out_dir = self.options['output_dir']
         if phase == 'train':
             # Compute losses
-            losses = self.agent.training_step()  # TODO this, check if f'' needed
+            losses = self.agent.training_step()
             with open(f'{out_dir}/losses.log', 'a+') as out_f:
-                out_f.write(f'{losses[0]}, {losses[1]}\n')
+                out_f.write(f'{losses[0]}, {losses[1]}, {losses[2]}\n')
             if 'output_model' in self.options['workload_manager']['agent']:
                 out_model = self.options['workload_manager']['agent']['output_model']
                 print(f"Writing model to {out_model}")

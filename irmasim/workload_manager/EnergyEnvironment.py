@@ -84,7 +84,6 @@ class EnergyEnvironment(gym.Env):
         - Dynamic power
         - Clock rate
         """
-        # TODO my version
         observation = []
         for job in self.workload_manager.pending_jobs[:self.NUM_JOBS]:
             wait_time = self.simulator.simulation_time - job.submit_time
@@ -120,11 +119,15 @@ class EnergyEnvironment(gym.Env):
                 else:
                     observation.append([0] * self.OBS_FEATURES)
 
-        num_fill_jobs = self.actions_size[0] - len(observation)
+        # Normalize
+        observation = observation / np.linalg.norm(observation)
+
         # No pad on top, pad 'num_fill_jobs' to the bottom, no pad left nor right
+        num_fill_jobs = self.actions_size[0] - len(observation)
         return torch.Tensor(np.pad(observation, [(0, num_fill_jobs), (0, 0)]))
 
     def reset(self, seed=None, options=None):
+        # The simulator resets itself, no need to intervene
         pass
 
     def render(self) -> Optional[Union[RenderFrame, List[RenderFrame]]]:
