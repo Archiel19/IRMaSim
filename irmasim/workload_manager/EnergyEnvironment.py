@@ -27,8 +27,7 @@ class EnergyEnvironment(gym.Env):
     - Wait time
 
     Node attributes:
-    - Total processors (why? I'm not going to use this one)
-    - Free processors
+    - Free processors / Total processors
     - Static power
     - Dynamic power
     - Clock rate
@@ -45,13 +44,15 @@ class EnergyEnvironment(gym.Env):
         env_options = self.options["workload_manager"]["environment"]
         self.NUM_JOBS = env_options["num_jobs"]
         self.NUM_NODES = env_options["num_nodes"]
-        self.OBS_FEATURES = 7
+        self.OBS_FEATURES = 8
 
         mod = importlib.import_module("irmasim.platform.models." + self.options["platform_model_name"] + ".Node")
         klass = getattr(mod, 'Node')
         self.resources = self.simulator.get_resources(klass)
 
         # Set reward function
+        self.last_energy = 0
+        self.last_time = 0
         reward_dict = {
             'energy_consumption': self._energy_consumption_reward,
             'edp': self._edp_reward
@@ -76,10 +77,11 @@ class EnergyEnvironment(gym.Env):
         Job attributes: (stay the same)
         - Number of requested processors (cores?)
         - Requested time
+        - Submit time
         - Wait time
 
         Node attributes:
-        - Free processors
+        - Free processors / total processors
         - Static power
         - Dynamic power
         - Clock rate
@@ -87,16 +89,13 @@ class EnergyEnvironment(gym.Env):
         observation = []
         for job in self.workload_manager.pending_jobs[:self.NUM_JOBS]:
             wait_time = self.simulator.simulation_time - job.submit_time
-            req_time = job.req_time
             req_cores = job.ntasks
-            job_obs = [wait_time, req_time, req_cores]
+            job_obs = [wait_time, job.req_time, job.submit_time, req_cores]
 
             for node in self.resources:
                 core_list = node.cores()
                 available_cores = 0
                 clock_rate_sum = 0
-
-                # TODO this is actually implemented in Processor.py, maybe use that instead
                 static_power = 0
                 idle_power = 0
                 dynamic_power = 0
@@ -115,11 +114,12 @@ class EnergyEnvironment(gym.Env):
                 if req_cores <= available_cores:
                     if available_cores == len(core_list):
                         static_power = idle_power
-                    observation.append(job_obs + [available_cores, static_power, dynamic_power, avg_clock_rate])
+                    observation.append(job_obs +
+                                       [available_cores / len(core_list), static_power, dynamic_power, avg_clock_rate])
                 else:
                     observation.append([0] * self.OBS_FEATURES)
 
-        # Normalize
+        # Normalize TODO: do this properly maybe
         observation = observation / np.linalg.norm(observation)
 
         # No pad on top, pad 'num_fill_jobs' to the bottom, no pad left nor right
@@ -127,8 +127,8 @@ class EnergyEnvironment(gym.Env):
         return torch.Tensor(np.pad(observation, [(0, num_fill_jobs), (0, 0)]))
 
     def reset(self, seed=None, options=None):
-        # The simulator resets itself, no need to intervene
-        pass
+        self.last_energy = 0
+        self.last_time = 0
 
     def render(self) -> Optional[Union[RenderFrame, List[RenderFrame]]]:
         pass
@@ -142,7 +142,6 @@ class EnergyEnvironment(gym.Env):
         job, node = pending_jobs.pop(job_idx), self.resources[node_idx]
         free_cores = [core for core in node.cores() if core.task is None]
 
-        # print(f'free cores: {len(free_cores)}, job ntasks: {job.ntasks}')
         assert len(free_cores) >= job.ntasks
         for task in job.tasks:
             task.allocate(free_cores.pop(0).full_id())
@@ -150,11 +149,13 @@ class EnergyEnvironment(gym.Env):
         running_jobs.append(job)
 
     def _energy_consumption_reward(self) -> float:
-        delta_time = self.simulator.simulation_time - self.workload_manager.last_time
-        return -self.simulator.platform.get_joules(delta_time)
+        energy_incr = self.simulator.energy - self.last_energy
+        self.last_energy = self.simulator.energy
+        return -energy_incr
 
     def _edp_reward(self) -> float:
-        makespan = self.workload_manager.last_time - self.simulator.simulation_time
+        makespan = self.simulator.simulation_time - self.last_time
+        self.last_time = self.simulator.simulation_time
         return self._energy_consumption_reward() * makespan
 
     def _get_action_pair(self, action: torch.Tensor) -> tuple:

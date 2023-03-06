@@ -26,7 +26,6 @@ class EnergyWM(WorkloadManager):
         self.resources = self.simulator.get_resources(klass)
         self.pending_jobs = []
         self.running_jobs = []
-        self.last_time = 0
 
         # DRL-related attributes
         self.environment = EnergyEnvironment(self, simulator)
@@ -45,7 +44,6 @@ class EnergyWM(WorkloadManager):
     def on_end_step(self):
         if self._can_schedule():
             self.agent.reward_last_action(self.environment.reward())
-            self.last_time = self.simulator.simulation_time  # Can't be called before reward_last_action
             observation = self.environment.get_obs()
             action, value, logp = self.agent.decide(observation)
             self.environment.apply_action(action, self.pending_jobs, self.running_jobs)
@@ -61,9 +59,9 @@ class EnergyWM(WorkloadManager):
         return False
 
     def on_end_trajectory(self):
-        self.last_time = 0
         logging.getLogger('irmasim').debug(f'{self.simulator.simulation_time} - Ending trajectory')
         self.agent.on_end_trajectory(self.environment.reward())
+        self.environment.reset()
 
     def on_end_simulation(self):
         phase = self.options['workload_manager']['agent']['phase']
