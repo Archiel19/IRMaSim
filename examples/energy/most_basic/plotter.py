@@ -1,13 +1,17 @@
 import argparse as ap
 import matplotlib.pyplot as plt
-import numpy as np
 
 
 def plot_losses(exp_dir: str):
     with open(f'{exp_dir}/losses.log', 'r') as l_f:
         losses_pairs = [tuple(map(float, lp.strip().split(','))) for lp in l_f.readlines()]
 
-    losses = ['pi', 'v', 'total']
+    if len(losses_pairs[0]) == 3:
+        losses = ['pi', 'v', 'total']
+    elif len(losses_pairs[0]) == 2:
+        losses = ['pi', 'v']
+    else:
+        losses = ['global']
     for i in range(len(losses)):
         plt.plot([l[i] for l in losses_pairs])
         plt.savefig(f'{exp_dir}/{losses[i]}_loss.png')

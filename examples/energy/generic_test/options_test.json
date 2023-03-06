@@ -1,5 +1,5 @@
 {
-  "seed": 29384,
+  "seed": 98709,
   "log_level": "DEBUG",
   "workload_file": "kit_64l4s_2.5GHz_50w-75w.json",
   "platform_file": "kit_platform_1984.json",
@@ -14,20 +14,19 @@
     },
     "agent": {
       "name": "EnergyActorCritic",
-      "minibatch_seed": 381,
-      "minibatch_size": 8,
-      "val_factor": 0.0001,
+      "minibatch_size": 20,
+      "val_factor": 1e-16,
       "h_factor": 0.0,
-      "clipping_factor": 0.2,
+      "clipping_factor": 0.23,
       "gamma": 0.99,
-      "lambda": 0.55,
-      "lr_pi": 0.0015,
-      "lr_v": 0.0015,
+      "lambda": 0.75,
+      "lr_pi": 0.002,
+      "lr_v": 0.002,
       "phase": "train",
-      "train_iters": 30
+      "train_iters": 15
     }
   },
   "nbtrajectories": 5,
-  "trajectory_length": 512,
+  "trajectory_length": 100,
   "trajectory_origin": "random"
 }
