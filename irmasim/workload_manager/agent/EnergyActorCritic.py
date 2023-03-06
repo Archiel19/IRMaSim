@@ -1,5 +1,4 @@
 import numpy as np
-import random
 from typing import Tuple, Any
 
 from irmasim.Options import Options
@@ -12,7 +11,6 @@ from torch.distributions import Categorical
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # TODO: can a trajectory end before trajectory_length steps?
-# TODO: where require_grad=False?
 
 
 class EnergyActorCritic:
@@ -26,8 +24,6 @@ class EnergyActorCritic:
         self.buffer = EnergyActorCritic.PPOBuffer(observation_size, buf_capacity)
 
         self.agent_options = Options().get()['workload_manager']['agent']
-
-        random.seed(self.agent_options['minibatch_seed'])
         self.lam = self.agent_options['lambda']
         self.gamma = self.agent_options['gamma']
 
@@ -49,7 +45,6 @@ class EnergyActorCritic:
             self.actor_optimizer.load_state_dict(checkpoint['optimizer_state_dict']['pi'])
             self.critic_optimizer.load_state_dict(checkpoint['optimizer_state_dict']['v'])
             # TODO: make this more elegant
-            # TODO: train or eval
 
     def state_dict(self):
         return {
@@ -62,7 +57,7 @@ class EnergyActorCritic:
         self.critic.load_state_dict(state_dict['critic'])
 
     def decide(self, observation: torch.Tensor) -> tuple:
-        with torch.no_grad():  # TODO: why?
+        with torch.no_grad():  # Grad will be used when computing losses, but not when generating training data
             action, logp_action, _ = self.actor.forward(observation.to(DEVICE))
             value = self.critic.forward(observation.to(DEVICE))
         return action, value, logp_action
@@ -89,6 +84,7 @@ class EnergyActorCritic:
         val_factor = self.agent_options['val_factor']
         h_factor = self.agent_options['h_factor']
         epsilon = self.agent_options['clipping_factor']
+        target_kl = self.agent_options['target_kl']
         assert num_samples % minibatch_size == 0
 
         # Normalize advantages, reset buffer and collect data
@@ -111,7 +107,11 @@ class EnergyActorCritic:
                 self.actor_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
 
-                loss_pi = self.actor.loss(minibatch, epsilon)
+                loss_pi, kl = self.actor.loss(minibatch, epsilon)
+
+                if kl > 1.5 * target_kl:
+                    break
+
                 loss_v = self.critic.loss(minibatch)
                 _, _, entropy = self.actor.forward(minibatch['obs'])
                 final_loss = loss_pi + (val_factor * loss_v) - (h_factor * entropy)
@@ -201,12 +201,8 @@ class EnergyActorCritic:
 
             # Create shuffled list of samples
             sample_dict = {}
-            seed = random.randint(0, 5000)  # TODO figure this out elegantly
             for k, v in self.dict.items():
-                np.random.seed(seed)  # Shuffle each array the same way
-                np.random.shuffle(v)  # TODO quite expensive, right? Also, check if it works
                 sample_dict[k] = torch.as_tensor(v, dtype=torch.float32, device=DEVICE)
-
             return sample_dict
 
     class Actor(nn.Module):
@@ -224,7 +220,6 @@ class EnergyActorCritic:
             out_2 = nn.functional.leaky_relu(self.hidden_1(out_1))
             out_3 = torch.squeeze(self.output(out_2), dim=-1)
             out = out_3 + (mask - 1) * 1e6
-            # TODO: check how the distribution looks, might need to normalize
 
             pi = Categorical(logits=out)
             action = pi.sample() if act is None else act
@@ -239,8 +234,10 @@ class EnergyActorCritic:
             _, logp, _ = self.forward(obs, act)
             ratio = torch.exp(logp - logp_old)
             clipped = torch.clip(ratio, 1.0 - epsilon, 1.0 + epsilon) * adv
-            loss = torch.minimum(ratio * adv, clipped)
-            return -torch.mean(loss)
+            loss = -torch.mean(torch.minimum(ratio * adv, clipped))
+
+            approx_kl = (logp_old - logp).mean().item()
+            return loss, approx_kl
 
     class Critic(nn.Module):
         def __init__(self, actions_size, observation_size):
@@ -274,6 +271,8 @@ class EnergyActorCritic:
 
         def loss(self, minibatch: dict):
             obs = minibatch['obs']
-            ret = minibatch['ret'].unsqueeze(1)
+            ret = minibatch['ret']
+            if ret.shape[0] != 1:
+                ret = ret.unsqueeze(1)
             loss = torch.nn.MSELoss()
-            return loss(self.forward(obs), ret)
+            return loss(self.forward(obs), ret).mean()
