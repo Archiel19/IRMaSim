@@ -41,7 +41,7 @@ each *time step*: each time a job is scheduled on a node.
 Consequently, after all the jobs have been scheduled, a total of `trajectory_length * nbtrajectories` samples have been
 collected.
 
-2. After some pre-processing of the training data, actor and critic __parameters are optimized__ using Minibatch Gradient Descent 
+2. After some pre-processing of the training data, actor and critic __parameters are optimized__ 
 for `train_iters` epochs using a common loss function created by combining both actor and critic losses plus entropy.
 During each epoch, all the samples are iterated over after being partitioned into minibatches of size `minibatch_size`.
 
