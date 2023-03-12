@@ -11,7 +11,7 @@
       "queue_sensitivity": 0,
       "objective": "energy_consumption",
       "num_jobs": 8,
-      "num_nodes": 2,
+      "num_nodes": 8,
       "obs_features": 7
     },
     "agent": {
@@ -22,7 +22,7 @@
       "phase": "train"
     }
   },
-  "nbtrajectories": 5,
+  "nbtrajectories": 3,
   "trajectory_length": 8,
   "trajectory_origin": 0
 }

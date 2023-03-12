@@ -10,7 +10,7 @@
     "environment": {
       "objective": "energy_consumption",
       "num_jobs": 8,
-      "num_nodes": 2
+      "num_nodes": 8
     },
     "agent": {
       "name": "EnergyActorCritic",
@@ -24,10 +24,10 @@
       "lr_v": 0.0025,
       "phase": "train",
       "train_iters": 40,
-      "target_kl": 0.1
+      "max_kl": 0.1
     }
   },
-  "nbtrajectories": 5,
+  "nbtrajectories": 3,
   "trajectory_length": 8,
   "trajectory_origin": 0
 }

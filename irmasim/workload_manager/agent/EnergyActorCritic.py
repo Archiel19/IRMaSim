@@ -27,9 +27,6 @@ class EnergyActorCritic:
         self.lam = self.agent_options['lambda']
         self.gamma = self.agent_options['gamma']
 
-        if self.agent_options['phase'] == 'train':
-            self.train_iters = self.agent_options['train_iters']
-
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=float(self.agent_options['lr_pi']))
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=float(self.agent_options['lr_v']))
 
@@ -81,15 +78,16 @@ class EnergyActorCritic:
         """
         num_samples = self.buffer.capacity
         minibatch_size = self.agent_options['minibatch_size']
+        train_iters = self.agent_options['train_iters']
         val_factor = self.agent_options['val_factor']
         h_factor = self.agent_options['h_factor']
         epsilon = self.agent_options['clipping_factor']
-        target_kl = self.agent_options['target_kl']
+        max_kl = self.agent_options['max_kl']
         assert num_samples % minibatch_size == 0
 
         # Normalize advantages, reset buffer and collect data
         training_data = self.buffer.on_end_simulation()
-        losses = np.zeros((self.train_iters, 3), dtype=np.float32)
+        losses = np.zeros((train_iters, 3), dtype=np.float32)
 
         def next_minibatch():
             for i in range(0, num_samples, minibatch_size):
@@ -102,14 +100,14 @@ class EnergyActorCritic:
                 yield m
         next_minibatch.counter = 0  # Can't be initialized inside the function
 
-        for epoch in range(self.train_iters):
+        for epoch in range(train_iters):
             for minibatch in next_minibatch():
                 self.actor_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
 
                 loss_pi, kl = self.actor.loss(minibatch, epsilon)
 
-                if kl > 1.5 * target_kl:
+                if kl > 1.5 * max_kl:
                     break
 
                 loss_v = self.critic.loss(minibatch)
@@ -199,7 +197,7 @@ class EnergyActorCritic:
             adv_std = np.std(self.adv)
             self.adv = (self.adv - adv_mean) / adv_std
 
-            # Create shuffled list of samples
+            # Create list of samples TODO shuffle or not?
             sample_dict = {}
             for k, v in self.dict.items():
                 sample_dict[k] = torch.as_tensor(v, dtype=torch.float32, device=DEVICE)
