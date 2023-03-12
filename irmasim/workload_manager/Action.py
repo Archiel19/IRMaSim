@@ -85,6 +85,7 @@ class Action(Policy):
     def on_end_trajectory(self):
         logging.getLogger('irmasim').debug(f'{self.simulator.simulation_time} - Ending trajectory')
         self.agent.finish_trajectory(self.environment.reward())
+        self.environment.reset()
 
     def on_end_simulation(self):
         options = Options().get()

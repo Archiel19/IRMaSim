@@ -16,6 +16,7 @@ from irmasim.Options import Options
 class ActionEnvironment(Environment):
 
     def __init__(self, workload_manager: 'Policy', simulator: Simulator) -> None:
+        super(ActionEnvironment, self).__init__(workload_manager, simulator)
         self.workload_manager = workload_manager
         self.simulator = simulator
         self.env_options = Options().get()["workload_manager"]["environment"]

@@ -108,6 +108,8 @@ Attributes:
         self.simulator = simulator
         self.env_options = Options().get()["workload_manager"]["environment"]
         self.last_job_queue_length = None
+        self.last_energy = 0
+        self.last_time = 0
 
         self.job_selections = OrderedDict({
             'random': None,
@@ -178,6 +180,10 @@ Attributes:
         self.reward = objective_to_reward[self.env_options['objective']]
         self.queue_sensitivity = self.env_options['queue_sensitivity']
         self.last_job_queue_length = 0
+
+    def reset(self, seed=None, options=None):
+        self.last_energy = 0
+        self.last_time = 0
 
     @property
     def action_size(self):
@@ -250,11 +256,14 @@ Attributes:
         return np.array(observation, dtype=np.float32)
 
     def makespan_reward(self) -> float:
-        return self.workload_manager.last_time - self.simulator.simulation_time
+        makespan = self.last_time - self.simulator.simulation_time
+        self.last_time = self.simulator.simulation_time
+        return makespan
 
     def energy_consumption_reward(self) -> float:
-        delta_time = self.simulator.simulation_time - self.workload_manager.last_time
-        return -self.simulator.platform.get_joules(delta_time)
+        energy_incr = self.simulator.energy - self.last_energy
+        self.last_energy = self.simulator.energy
+        return -energy_incr
 
     def edp_reward(self) -> float:
         return self.energy_consumption_reward() * self.makespan_reward()
