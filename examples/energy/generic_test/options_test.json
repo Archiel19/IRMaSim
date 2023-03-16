@@ -1,0 +1,32 @@
+{
+  "seed": 98709,
+  "log_level": "DEBUG",
+  "workload_file": "kit_64l4s_2.5GHz_50w-75w.json",
+  "platform_file": "kit_platform_1984.json",
+  "platform_name": "the_platform",
+  "output_dir": "test",
+  "workload_manager": {
+    "type": "EnergyWM",
+    "environment": {
+      "objective": "energy_consumption",
+      "num_jobs": 16,
+      "num_nodes": 80
+    },
+    "agent": {
+      "name": "EnergyActorCritic",
+      "minibatch_size": 20,
+      "val_factor": 1e-16,
+      "h_factor": 0.0,
+      "clipping_factor": 0.23,
+      "gamma": 0.99,
+      "lambda": 0.75,
+      "lr_pi": 0.002,
+      "lr_v": 0.002,
+      "phase": "train",
+      "train_iters": 15
+    }
+  },
+  "nbtrajectories": 5,
+  "trajectory_length": 100,
+  "trajectory_origin": "random"
+}

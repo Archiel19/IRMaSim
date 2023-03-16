@@ -39,8 +39,10 @@ class Simulator:
         options = Options().get()
         nbtrajectories = int(options['nbtrajectories'])
         for i in range(nbtrajectories):
+            self.simulation_time = 0
             self.job_queue = self.generate_workload(self.simulation_time)
             self.simulate_trajectory()
+            self.workload_manager.on_end_trajectory()
         self.workload_manager.on_end_simulation()
 
     def simulate_trajectory(self) -> None:
@@ -227,7 +229,7 @@ class Simulator:
                     raise Exception(f"A job can specify a 'res' option or ('nodes','ntasks','ntasks_per_node'). But Job {job['id']} specify both")
                 job['nodes'] = 1
                 job['ntasks'] = job['res']
-                del job['res'] 
+                del job['res']
             if 'ntasks' not in job and 'nodes' not in job:
                 raise Exception(f"Job {job['id']} requires specifying 'nodes' or 'ntasks' at least")
             if 'ntasks' in job and 'nodes' in job and 'ntasks_per_node' in job:

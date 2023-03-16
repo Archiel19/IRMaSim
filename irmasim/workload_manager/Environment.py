@@ -108,6 +108,8 @@ Attributes:
         self.simulator = simulator
         self.env_options = Options().get()["workload_manager"]["environment"]
         self.last_job_queue_length = None
+        self.last_energy = 0
+        self.last_time = 0
 
         self.job_selections = OrderedDict({
             'random': None,
@@ -150,8 +152,8 @@ Attributes:
         self.resources = self.simulator.get_resources(klass)
 
         if 'observation' in self.env_options:
-            if self.env_options['observation'] == 'jaime':
-                self.observation = self.observation_jaime
+            if self.env_options['observation'] == 'action':
+                self.observation = self.observation_action
             else:
                 self.observation = partial(self._base_observation, otype=self.env_options['observation'])
         else:
@@ -178,6 +180,10 @@ Attributes:
         self.reward = objective_to_reward[self.env_options['objective']]
         self.queue_sensitivity = self.env_options['queue_sensitivity']
         self.last_job_queue_length = 0
+
+    def reset(self, seed=None, options=None):
+        self.last_energy = 0
+        self.last_time = 0
 
     @property
     def action_size(self):
@@ -250,35 +256,39 @@ Attributes:
         return np.array(observation, dtype=np.float32)
 
     def makespan_reward(self) -> float:
-        return self.workload_manager.last_time - self.simulator.simulation_time
+        makespan = self.last_time - self.simulator.simulation_time
+        self.last_time = self.simulator.simulation_time
+        return makespan
 
     def energy_consumption_reward(self) -> float:
-        delta_time = self.simulator.simulation_time - self.workload_manager.last_time
-        return -self.simulator.platform.get_joules(delta_time)
+        energy_incr = self.simulator.energy - self.last_energy
+        self.last_energy = self.simulator.energy
+        return -energy_incr
 
     def edp_reward(self) -> float:
         return self.energy_consumption_reward() * self.makespan_reward()
 
     def slowdown_reward(self) -> float:
-        return -self.simulator.slowdown_statistics()["total"]
+        return -self.simulator.slowdown_statistics()["avg"]
 
     def bounded_slowdown_reward(self) -> float:
-        return -self.simulator.bounded_slowdown_statistics()["total"]
+        return -self.simulator.bounded_slowdown_statistics()["avg"]
 
     def waiting_time_reward(self) -> float:
-        return -self.simulator.waiting_time_statistics()["total"]
+        return -self.simulator.waiting_time_statistics()["avg"]
         
 
-    def observation_jaime(self):
+    def observation_action(self):
         options = Options().get()
         mod = importlib.import_module("irmasim.platform.models." + options["platform_model_name"] + ".Core")
         klass = getattr(mod, 'Core')
 
         observation = []
-        for job in self.workload_manager.pending_jobs:
+        # Assume that this is only ever going to be called from an Environment with self.NUM_JOBS defined
+        for job in self.workload_manager.pending_jobs[:self.NUM_JOBS]:
             wait_time = self.simulator.simulation_time - job.submit_time
             req_time = job.req_time
-            req_core = job.resources
+            req_core = job.ntasks
             job_obs = [wait_time, req_time, req_core]
 
             for node in self.resources:
@@ -290,9 +300,13 @@ Attributes:
                     if core.task is None:
                         available_core_list.append(core)
                 avg_clock_rate = clock_rate_sum/len(core_list)
-                observation.append(job_obs + [len(core_list),len(available_core_list), avg_clock_rate, int(req_core <= len(available_core_list))])
-                
-        return np.array(observation, dtype=np.float32)
+                if req_core <= len(available_core_list):
+                    observation.append(job_obs + [len(core_list),len(available_core_list), avg_clock_rate, int(req_core <= len(available_core_list))])
+                else:
+                    observation.append([0] * 7)
+
+        num_fill_jobs = self.action_size - len(observation)
+        return np.pad(observation, [(0, num_fill_jobs), (0, 0)])
 
 def normalise(l: list) -> list:
    maximum = max(l)
