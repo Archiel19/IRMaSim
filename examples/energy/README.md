@@ -4,8 +4,8 @@ This directory includes a series of experiments designed to compare the performa
 of a series of heuristics and intelligent agents when it comes to reducing energy consumption.
 
 More specifically, the following are tested:
-* __high_cores__: assigns the next job in the queue to the processor with the highest number of cores.
-* __high_gflops__: analogous to the former, but the job is assigned to the processor with the highest gflops.
+* __low_power__: assigns the next job in the queue to the processor with the least power.
+* __high_gflops__: assigns the next job in the queue to the processor with the highest gflops.
 * __policy__: RL-based agent which attempts to select the best policy for scheduling the given trace. The policy is itself comprised
 by both a job selection policy and a node selection policy.
 * __action__: RL-based agent which attempts to choose the best job-node assignment at each scheduling
@@ -42,15 +42,14 @@ Consequently, after all the jobs have been scheduled, a total of `trajectory_len
 collected.
 
 2. After some pre-processing of the training data, actor and critic __parameters are optimized__ 
-for `train_iters` epochs using a common loss function created by combining both actor and critic losses plus entropy.
+for `train_iters` epochs, the same number for both actor and critic. The actor's loss function includes an entropy factor.
 During each epoch, all the samples are iterated over after being partitioned into minibatches of size `minibatch_size`.
 
 A brief and informal description of the rest of the training hyperparameters can be found below:
 
 * `max_kl`: maximum Kullback-Leibler divergence between the current policy and the updated policy. Used to cut off training
 if the policy's probability distribution starts to change too much. (Added because it seemed to help in training)
-* `val_factor`: weight of the critic's loss in the joint loss function.
-* `h_factor`: weight of the policy's entropy in the joint loss function. Encourages exploration.
+* `h_factor`: weight of the policy's entropy in the actor's loss function. Encourages exploration.
 * `lr_pi`: learning rate for the policy (actor) optimizer
 * `lr_v`: learning rate for the value (critic) optimizer
 

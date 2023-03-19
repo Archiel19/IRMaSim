@@ -15,9 +15,8 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class EnergyActorCritic:
     def __init__(self, actions_size: tuple, observation_size: tuple, load_agent: bool = True):
-
-        self.actor = EnergyActorCritic.Actor(observation_size[1])
-        self.critic = EnergyActorCritic.Critic(actions_size[0], observation_size[1])  # TODO make sense of the dims
+        self.actor = EnergyActorCritic.Actor(observation_size)
+        self.critic = EnergyActorCritic.Critic(actions_size, observation_size)
 
         options = Options().get()
         buf_capacity = options['trajectory_length'] * options['nbtrajectories']
@@ -41,7 +40,14 @@ class EnergyActorCritic:
             checkpoint['optimizer_state_dict']['v']['param_groups'][0]['lr'] = float(self.agent_options['lr_v'])
             self.actor_optimizer.load_state_dict(checkpoint['optimizer_state_dict']['pi'])
             self.critic_optimizer.load_state_dict(checkpoint['optimizer_state_dict']['v'])
-            # TODO: make this more elegant
+
+        # For learning rate scheduling based on Stochastic Weight Averaging
+        self.actor_swa_model = torch.optim.swa_utils.AveragedModel(self.actor)
+        self.actor_swa_scheduler = torch.optim.swa_utils.SWALR(self.actor_optimizer,
+                                                               anneal_strategy="linear",
+                                                               anneal_epochs=self.agent_options['train_iters'],
+                                                               swa_lr=float(self.agent_options['lr_pi']))
+
 
     def state_dict(self):
         return {
@@ -79,7 +85,6 @@ class EnergyActorCritic:
         num_samples = self.buffer.capacity
         minibatch_size = self.agent_options['minibatch_size']
         train_iters = self.agent_options['train_iters']
-        val_factor = self.agent_options['val_factor']
         h_factor = self.agent_options['h_factor']
         epsilon = self.agent_options['clipping_factor']
         max_kl = self.agent_options['max_kl']
@@ -87,7 +92,7 @@ class EnergyActorCritic:
 
         # Normalize advantages, reset buffer and collect data
         training_data = self.buffer.on_end_simulation()
-        losses = np.zeros((train_iters, 3), dtype=np.float32)
+        losses = np.zeros((train_iters, 2), dtype=np.float32)
 
         def next_minibatch():
             for i in range(0, num_samples, minibatch_size):
@@ -101,27 +106,27 @@ class EnergyActorCritic:
         next_minibatch.counter = 0  # Can't be initialized inside the function
 
         for epoch in range(train_iters):
+            kl = 0
             for minibatch in next_minibatch():
+                # Actor
                 self.actor_optimizer.zero_grad()
-                self.critic_optimizer.zero_grad()
-
-                loss_pi, kl = self.actor.loss(minibatch, epsilon)
-
-                if kl > 1.5 * max_kl:
-                    break
-
-                loss_v = self.critic.loss(minibatch)
+                temp_loss, kl = self.actor.loss(minibatch, epsilon)
                 _, _, entropy = self.actor.forward(minibatch['obs'])
-                final_loss = loss_pi + (val_factor * loss_v) - (h_factor * entropy)
-                final_loss.backward()
-
-                self.actor_optimizer.step()
-                self.critic_optimizer.step()
-
+                loss_pi = temp_loss - (h_factor * entropy)
                 losses[epoch][0] = loss_pi.item()
-                losses[epoch][1] = loss_v.item()
-                losses[epoch][2] = final_loss.item()
+                loss_pi.backward()
+                self.actor_optimizer.step()
+                self.actor_swa_model.update_parameters(self.actor)
+                self.actor_swa_scheduler.step()
 
+                # Critic
+                self.critic_optimizer.zero_grad()
+                loss_v = self.critic.loss(minibatch)
+                losses[epoch][1] = loss_v.item()
+                loss_v.backward()
+                self.critic_optimizer.step()
+            if kl > 1.5 * max_kl:
+                break
         return np.mean(losses, axis=0)
 
     class PPOBuffer:
@@ -206,18 +211,20 @@ class EnergyActorCritic:
     class Actor(nn.Module):
         def __init__(self, observation_size):
             super(EnergyActorCritic.Actor, self).__init__()
-            self.input = nn.Linear(observation_size, 32, device=DEVICE)
-            self.hidden_0 = nn.Linear(32, 16, device=DEVICE)
-            self.hidden_1 = nn.Linear(16, 8, device=DEVICE)
+            self.input = nn.Linear(observation_size[1], 64, device=DEVICE)
+            self.hidden_0 = nn.Linear(64, 32, device=DEVICE)
+            self.hidden_1 = nn.Linear(32, 16, device=DEVICE)
+            self.hidden_2 = nn.Linear(16, 8, device=DEVICE)
             self.output = nn.Linear(8, 1, device=DEVICE)
 
         def forward(self, observation: torch.Tensor, act=None) -> Tuple[Any, Any, Any]:
             mask = torch.where(observation.sum(dim=-1) != 0.0, 1.0, 0.0)
-            out_0 = nn.functional.leaky_relu(self.input(observation))
-            out_1 = nn.functional.leaky_relu(self.hidden_0(out_0))
-            out_2 = nn.functional.leaky_relu(self.hidden_1(out_1))
-            out_3 = torch.squeeze(self.output(out_2), dim=-1)
-            out = out_3 + (mask - 1) * 1e6
+            out_0 = nn.functional.gelu(self.input(observation))
+            out_1 = nn.functional.gelu(self.hidden_0(out_0))
+            out_2 = nn.functional.gelu(self.hidden_1(out_1))
+            out_3 = nn.functional.gelu(self.hidden_2(out_2))
+            out_4 = torch.squeeze(self.output(out_3), dim=-1)
+            out = out_4 + (mask - 1) * 1e6
 
             pi = Categorical(logits=out)
             action = pi.sample() if act is None else act
@@ -241,12 +248,12 @@ class EnergyActorCritic:
         def __init__(self, actions_size, observation_size):
             super(EnergyActorCritic.Critic, self).__init__()
 
-            self.input = nn.Linear(observation_size, 32, device=DEVICE)
+            self.input = nn.Linear(observation_size[1], 32, device=DEVICE)
             self.hidden_0_0 = nn.Linear(32, 16, device=DEVICE)
             self.hidden_0_1 = nn.Linear(16, 8, device=DEVICE)
             self.hidden_0_2 = nn.Linear(8, 1, device=DEVICE)
 
-            self.hidden_1_1 = nn.Linear(actions_size, 64, device=DEVICE)
+            self.hidden_1_1 = nn.Linear(actions_size[0], 64, device=DEVICE)
             self.hidden_1_2 = nn.Linear(64, 32, device=DEVICE)
             self.hidden_1_3 = nn.Linear(32, 8, device=DEVICE)
             self.output = nn.Linear(8, 1, device=DEVICE)
@@ -254,16 +261,16 @@ class EnergyActorCritic:
         def forward(self, observation: torch.Tensor) -> torch.Tensor:
 
             # First phase output: dim = (num_batches, all job-node combinations (actions_size))
-            out_0_0 = nn.functional.leaky_relu(self.input(observation))
-            out_0_1 = nn.functional.leaky_relu(self.hidden_0_0(out_0_0))
-            out_0_2 = nn.functional.leaky_relu(self.hidden_0_1(out_0_1))
-            out_0_3 = nn.functional.leaky_relu(self.hidden_0_2(out_0_2))
+            out_0_0 = nn.functional.gelu(self.input(observation))
+            out_0_1 = nn.functional.gelu(self.hidden_0_0(out_0_0))
+            out_0_2 = nn.functional.gelu(self.hidden_0_1(out_0_1))
+            out_0_3 = nn.functional.gelu(self.hidden_0_2(out_0_2))
             out_1 = torch.squeeze(out_0_3)
 
             # Second phase:
-            out_1_2 = nn.functional.leaky_relu(self.hidden_1_1(out_1))
-            out_1_3 = nn.functional.leaky_relu(self.hidden_1_2(out_1_2))
-            out_1_4 = nn.functional.leaky_relu(self.hidden_1_3(out_1_3))
+            out_1_2 = nn.functional.gelu(self.hidden_1_1(out_1))
+            out_1_3 = nn.functional.gelu(self.hidden_1_2(out_1_2))
+            out_1_4 = nn.functional.gelu(self.hidden_1_3(out_1_3))
 
             return self.output(out_1_4)
 
