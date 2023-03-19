@@ -24,8 +24,6 @@ class EnergyWM(WorkloadManager):
         klass = getattr(mod, 'Node')
 
         self.resources = self.simulator.get_resources(klass)
-        self.pending_jobs = []
-        self.running_jobs = []
 
         # DRL-related attributes
         self.environment = EnergyEnvironment(self, simulator)
@@ -33,30 +31,23 @@ class EnergyWM(WorkloadManager):
                                        self.environment.observation_size)
 
     def on_job_submission(self, jobs: list):
-        self.pending_jobs += jobs
+        self.environment.add_jobs(jobs)
 
     def on_job_completion(self, jobs: list):
         for job in jobs:
             logging.getLogger("irmasim").debug(
                 f"{self.simulator.simulation_time} {job.name} finished")
-            self.running_jobs.remove(job)
 
     def on_end_step(self):
-        if self._can_schedule():
+        if self.environment.can_schedule():
             self.agent.reward_last_action(self.environment.reward())
             observation = self.environment.get_obs()
             action, value, logp = self.agent.decide(observation)
-            self.environment.apply_action(action, self.pending_jobs, self.running_jobs)
+            self.environment.apply_action(action)
 
             # Rewards can only be computed after the simulator has applied the action,
             # so there's a separate function in the agent to reward the last taken action
             self.agent.buffer.store(observation, action, value, logp)
-
-    def _can_schedule(self):
-        for job in self.pending_jobs[:self.environment.NUM_JOBS]:
-            if job.ntasks <= max([node.count_idle_cores() for node in self.resources]):
-                return True
-        return False
 
     def on_end_trajectory(self):
         logging.getLogger('irmasim').debug(f'{self.simulator.simulation_time} - Ending trajectory')
@@ -70,7 +61,7 @@ class EnergyWM(WorkloadManager):
             # Compute losses
             losses = self.agent.training_step()
             with open(f'{out_dir}/losses.log', 'a+') as out_f:
-                out_f.write(f'{losses[0]}, {losses[1]}, {losses[2]}\n')
+                out_f.write(f'{losses[0]}, {losses[1]}\n')
             if 'output_model' in self.options['workload_manager']['agent']:
                 out_model = self.options['workload_manager']['agent']['output_model']
                 print(f"Writing model to {out_model}")
