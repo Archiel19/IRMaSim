@@ -14,13 +14,10 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class EnergyActorCritic:
-    def __init__(self, actions_size: tuple, observation_size: tuple, load_agent: bool = True):
+    def __init__(self, observation_size: tuple, load_agent: bool = True):
         self.actor = EnergyActorCritic.Actor(observation_size)
-        self.critic = EnergyActorCritic.Critic(actions_size, observation_size)
-
-        options = Options().get()
-        buf_capacity = options['trajectory_length'] * options['nbtrajectories']
-        self.buffer = EnergyActorCritic.PPOBuffer(observation_size, buf_capacity)
+        self.critic = EnergyActorCritic.Critic(observation_size)
+        self.buffer = EnergyActorCritic.PPOBuffer()
 
         self.agent_options = Options().get()['workload_manager']['agent']
         self.lam = self.agent_options['lambda']
@@ -63,7 +60,7 @@ class EnergyActorCritic:
         with torch.no_grad():  # Grad will be used when computing losses, but not when generating training data
             action, logp_action, _ = self.actor.forward(observation.to(DEVICE))
             value = self.critic.forward(observation.to(DEVICE))
-        return action, value, logp_action
+        return action.item(), value.item(), logp_action.item()
 
     @property
     def total_rewards(self):
@@ -82,13 +79,12 @@ class EnergyActorCritic:
         Based on the code of the guy who did his master's thesis on PPO,
         and on ActionActorCritic
         """
-        num_samples = self.buffer.capacity
+        num_samples = self.buffer.num_samples()
         minibatch_size = self.agent_options['minibatch_size']
         train_iters = self.agent_options['train_iters']
         h_factor = self.agent_options['h_factor']
         epsilon = self.agent_options['clipping_factor']
         max_kl = self.agent_options['max_kl']
-        assert num_samples % minibatch_size == 0
 
         # Normalize advantages, reset buffer and collect data
         training_data = self.buffer.on_end_simulation()
@@ -97,13 +93,9 @@ class EnergyActorCritic:
         def next_minibatch():
             for i in range(0, num_samples, minibatch_size):
                 m = {}
-                for k in ['obs', 'act', 'rew', 'val', 'logp', 'adv', 'ret']:
+                for k in self.buffer.dict.keys():
                     m[k] = training_data[k][i:i+minibatch_size]
-
-                # Think of this as a static variable in C/C++
-                next_minibatch.counter += minibatch_size
                 yield m
-        next_minibatch.counter = 0  # Can't be initialized inside the function
 
         for epoch in range(train_iters):
             kl = 0
@@ -130,45 +122,60 @@ class EnergyActorCritic:
         return np.mean(losses, axis=0)
 
     class PPOBuffer:
-        def __init__(self, observation_size, dim):
-            self.capacity = dim
-            self.obs = np.zeros((dim, *observation_size), dtype=np.float32)
-            self.act = np.zeros(dim, dtype=np.float32)
-            self.rew = np.zeros(dim, dtype=np.float32)
-            self.val = np.zeros(dim, dtype=np.float32)
-            self.logp = np.zeros(dim, dtype=np.float32)
-            self.adv = np.zeros(dim, dtype=np.float32)
-            self.ret = np.zeros(dim, dtype=np.float32)
-            self.dict = {'obs': self.obs, 'act': self.act, 'rew': self.rew, 'val': self.val,
-                         'logp': self.logp, 'adv': self.adv, 'ret': self.ret}
-
+        def __init__(self):
             self.start_ptr = 0
             self.curr_ptr = 0
             self.total_rewards = 0
 
+            self.obs = []
+            self.act = []
+            self.rew = []
+            self.val = []
+            self.logp = []
+            self.dict = {'obs': self.obs, 'act': self.act, 'rew': self.rew, 'val': self.val, 'logp': self.logp}
+
+            # Computed at the end of each trajectory making use of numpy
+            # TODO: Small problem: have to be manually assigned to the dict at the end of each simulation because
+            # TODO: np.append() is used, changing the reference.
+            self.adv = np.empty(0)
+            self.ret = np.empty(0)
+
+        def num_samples(self):
+            return len(self.act)  # For example
+
+        def _reset(self):
+            self.start_ptr = 0
+            self.curr_ptr = 0
+
+            self.obs.clear()
+            self.act.clear()
+            self.rew.clear()
+            self.val.clear()
+            self.logp.clear()
+            self.adv = np.empty(0)
+            self.ret = np.empty(0)
+
         def store(self, observation, action, value, logp, reward=0) -> None:
-            assert self.curr_ptr < self.capacity
-            self.obs[self.curr_ptr] = observation
-            self.act[self.curr_ptr] = action
-            self.rew[self.curr_ptr] = reward
-            self.val[self.curr_ptr] = value
-            self.logp[self.curr_ptr] = logp
+            self.obs.append(observation)
+            self.act.append(action)
+            self.rew.append(reward)
+            self.val.append(value)
+            self.logp.append(logp)
             self.curr_ptr += 1
 
         def store_past_reward(self, reward) -> None:
             if self.curr_ptr > 0:
-                self.rew[self.curr_ptr - 1] = reward
+                self.rew[-1] = reward
 
         def on_end_trajectory(self, gamma, lam, last_reward) -> None:
-            self.rew[self.curr_ptr - 1] = last_reward
+            self.store_past_reward(last_reward)
             trajectory_slice = slice(self.start_ptr, self.curr_ptr)
 
             # Compute advantages and rewards-to-go
-            rewards = self.rew[trajectory_slice]
+            rewards = np.array(self.rew[trajectory_slice], dtype=np.float32)
+            values = np.array(self.val[trajectory_slice], dtype=np.float32)
             self.total_rewards = np.sum(rewards)
-
-            values = self.val[trajectory_slice]
-            values = np.append(values, 0)  # This acts as our mask to avoid taking into account the last value
+            values = np.append(values, 0) # This acts as our mask to avoid taking into account the last value
 
             def discounted_sum(array, discount):
                 # Based on https://stackoverflow.com/questions/47970683/vectorize-a-numpy-discount-calculation
@@ -179,8 +186,8 @@ class EnergyActorCritic:
             advantages = discounted_sum(deltas, gamma * lam)
             expected_returns = discounted_sum(rewards, gamma)
 
-            self.adv[trajectory_slice] = advantages
-            self.ret[trajectory_slice] = expected_returns
+            self.adv = np.append(self.adv, advantages)
+            self.ret = np.append(self.ret, expected_returns)
 
             # Advance
             self.start_ptr = self.curr_ptr
@@ -191,21 +198,25 @@ class EnergyActorCritic:
 
             Returns collected data
             """
-            assert self.curr_ptr == self.capacity
-
-            # Reset
-            self.start_ptr = 0
-            self.curr_ptr = 0
 
             # Normalize advantages
             adv_mean = np.mean(self.adv)
             adv_std = np.std(self.adv)
             self.adv = (self.adv - adv_mean) / adv_std
 
-            # Create list of samples TODO shuffle or not?
+            self.dict['adv'] = self.adv
+            self.dict['ret'] = self.ret
+
+            # Create list of samples
             sample_dict = {}
             for k, v in self.dict.items():
+                if k == 'obs':
+                    v = torch.stack(v)
                 sample_dict[k] = torch.as_tensor(v, dtype=torch.float32, device=DEVICE)
+
+            # Reset
+            self._reset()
+
             return sample_dict
 
     class Actor(nn.Module):
@@ -219,6 +230,7 @@ class EnergyActorCritic:
 
         def forward(self, observation: torch.Tensor, act=None) -> Tuple[Any, Any, Any]:
             mask = torch.where(observation.sum(dim=-1) != 0.0, 1.0, 0.0)
+            mask[-1] = 1.0
             out_0 = nn.functional.gelu(self.input(observation))
             out_1 = nn.functional.gelu(self.hidden_0(out_0))
             out_2 = nn.functional.gelu(self.hidden_1(out_1))
@@ -245,15 +257,14 @@ class EnergyActorCritic:
             return loss, approx_kl
 
     class Critic(nn.Module):
-        def __init__(self, actions_size, observation_size):
+        def __init__(self, observation_size):
             super(EnergyActorCritic.Critic, self).__init__()
-
             self.input = nn.Linear(observation_size[1], 32, device=DEVICE)
             self.hidden_0_0 = nn.Linear(32, 16, device=DEVICE)
             self.hidden_0_1 = nn.Linear(16, 8, device=DEVICE)
             self.hidden_0_2 = nn.Linear(8, 1, device=DEVICE)
 
-            self.hidden_1_1 = nn.Linear(actions_size[0], 64, device=DEVICE)
+            self.hidden_1_1 = nn.Linear(observation_size[0], 64, device=DEVICE)
             self.hidden_1_2 = nn.Linear(64, 32, device=DEVICE)
             self.hidden_1_3 = nn.Linear(32, 8, device=DEVICE)
             self.output = nn.Linear(8, 1, device=DEVICE)

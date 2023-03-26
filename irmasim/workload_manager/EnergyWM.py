@@ -27,13 +27,13 @@ class EnergyWM(WorkloadManager):
 
         # DRL-related attributes
         self.environment = EnergyEnvironment(self, simulator)
-        self.agent = EnergyActorCritic(self.environment.actions_size,
-                                       self.environment.observation_size)
+        self.agent = EnergyActorCritic(self.environment.observation_size)
 
     def on_job_submission(self, jobs: list):
         self.environment.add_jobs(jobs)
 
     def on_job_completion(self, jobs: list):
+        self.environment.finish_jobs(jobs)
         for job in jobs:
             logging.getLogger("irmasim").debug(
                 f"{self.simulator.simulation_time} {job.name} finished")
@@ -51,7 +51,7 @@ class EnergyWM(WorkloadManager):
 
     def on_end_trajectory(self):
         logging.getLogger('irmasim').debug(f'{self.simulator.simulation_time} - Ending trajectory')
-        self.agent.on_end_trajectory(self.environment.reward())
+        self.agent.on_end_trajectory(self.environment.reward(last_reward=True))
         self.environment.reset()
 
     def on_end_simulation(self):

@@ -19,7 +19,7 @@ class Task:
         self.resource = resource
 
     def advance(self, delta_time: float, delta_ops: float):
-        self.ops -= math.floor(delta_ops)
+        self.ops -= math.floor(delta_ops + 1e-6)  # TODO: fp rounding error creates infinite loop when delta_ops = 0.9999...
         if self.ops >= 0:
             self.execution_time += delta_time
 

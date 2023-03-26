@@ -6,6 +6,7 @@ import torch
 from gym import spaces
 from gym.core import ActType, ObsType, RenderFrame
 import numpy as np
+import math
 from typing import TYPE_CHECKING, Tuple, Optional, Union, List
 from irmasim.workload_manager import EnergyWM
 
@@ -42,6 +43,7 @@ class EnergyEnvironment(gym.Env):
         self.NUM_JOBS = env_options["num_jobs"]
         self.NUM_NODES = env_options["num_nodes"]
         self.OBS_FEATURES = 8
+        self.PENALTY = 100.0
 
         mod = importlib.import_module("irmasim.platform.models." + self.options["platform_model_name"] + ".Node")
         klass = getattr(mod, 'Node')
@@ -52,19 +54,26 @@ class EnergyEnvironment(gym.Env):
         self.static_power = dict.fromkeys(self.resources)
         self.idle_power = dict.fromkeys(self.resources)
         self.clock_rate = dict.fromkeys(self.resources)
+        self.assigned_jobs = dict.fromkeys(self.resources)
+        self.job_node_pairings = dict()
         for node in self.resources:
             self.static_power[node] = sum([core.static_power for core in node.cores()])
             self.idle_power[node] = sum([core.min_power * core.static_power for core in node.cores()])
             self.clock_rate[node] = sum([core.clock_rate for core in node.cores()]) / len(node.cores())
+            self.assigned_jobs[node] = set()
+        self.min_clock_rate = min(self.clock_rate.values())
+
 
         # Action space (match a job with a node)
-        self.action_space = spaces.Discrete(self.NUM_JOBS * self.NUM_NODES)
+        self.action_space = spaces.Discrete(self.NUM_JOBS * self.NUM_NODES + 1)  # + 1 for 'wait'
 
         # Observation space
-        # For each node: dyn power, static power, num cores, can be scheduled
         self.observation_space = gym.spaces.Box(low=0.0, high=1.0,
-                                                shape=(self.NUM_JOBS * self.NUM_NODES, self.OBS_FEATURES),
+                                                shape=(self.NUM_JOBS * self.NUM_NODES + 1, self.OBS_FEATURES),
                                                 dtype=np.float32)
+
+        # Extra action
+        self.wait_action = self.NUM_JOBS * self.NUM_NODES
 
         # Set reward function
         self.last_energy = 0
@@ -119,7 +128,8 @@ class EnergyEnvironment(gym.Env):
             observation = observation / np.linalg.norm(observation)
 
         # No pad on top, pad 'num_fill_jobs' to the bottom, no pad left nor right
-        num_fill_jobs = self.actions_size[0] - len(observation)
+        # The last row will always be for the no job - no node pairing
+        num_fill_jobs = self.observation_size[0] - len(observation)
         return torch.Tensor(np.pad(observation, [(0, num_fill_jobs), (0, 0)]))
 
     def step(self, action: ActType) -> Tuple[ObsType, float, bool, bool, dict]:
@@ -128,12 +138,19 @@ class EnergyEnvironment(gym.Env):
     def reset(self, seed=None, options=None):
         self.last_energy = 0
         self.last_time = 0
+        self.pending_jobs = []
 
     def render(self) -> Optional[Union[RenderFrame, List[RenderFrame]]]:
         pass
 
     def add_jobs(self, jobs):
         self.pending_jobs += jobs
+
+    def finish_jobs(self, finished_jobs):
+        for job in finished_jobs:
+            node = self.job_node_pairings[job.id]
+            self.assigned_jobs[node].remove(job.id)
+            del self.job_node_pairings[job.id]
 
     def can_schedule(self):
         for job in self.pending_jobs[:self.NUM_JOBS]:
@@ -147,11 +164,34 @@ class EnergyEnvironment(gym.Env):
         # Should only be called after making sure the job can be scheduled on the node
         assert job.ntasks <= node.count_idle_cores()
         free_cores = [core for core in node.cores() if not core.task]
-        dynamic_power = sum([core.dynamic_power for core in free_cores[:job.ntasks]])
-        static_power = self.static_power[node]
-        return job.req_time * (static_power + dynamic_power)  # TODO req_time or something else?
 
-    def apply_action(self, action: ActType) -> None:
+        # TODO use node avg clock rate or only the avg of the free cores?
+        node_clock_rate = self.clock_rate[node]
+        time_estimate = (self.min_clock_rate / node_clock_rate) * job.req_time
+
+        # TODO: in static power, consider more jobs can be scheduled on the same node eventually?
+        dynamic_power = sum([core.dynamic_power for core in free_cores[:job.ntasks]])
+        num_jobs = len(self.assigned_jobs[node]) + 1  # + 1 for the target job
+        static_power = self.static_power[node] / num_jobs
+
+        # print(f'Free cores: {len(free_cores)}')
+        # print(f'Total cores: {len(node.cores())}')
+        # print(f'Req time: {job.req_time}')
+        # print(f'Avg node freq: {node_clock_rate}')
+        # print(f'Min freq: {self.min_clock_rate}')
+        # print(f'Job ntasks: {job.ntasks}')
+        # print(f'Dynamic power: {dynamic_power}')
+        # print(f'Static power: {static_power}')
+        # print(f'Time estimate: {time_estimate}')
+        # print(f'Assigned jobs: {len(self.assigned_jobs[node])}')
+        # est = time_estimate * (static_power + dynamic_power)
+        # print(est)
+        return time_estimate * (static_power + dynamic_power)
+
+    def apply_action(self, action: int) -> None:
+        if action == self.wait_action:
+            return
+
         job_idx, node_idx = self._get_action_pair(action)
         logging.getLogger("irmasim").debug(
             f"{self.simulator.simulation_time} performing action Job({job_idx})-Node({node_idx}) ({action})")
@@ -163,21 +203,27 @@ class EnergyEnvironment(gym.Env):
         assert len(free_cores) >= job.ntasks
         for task in job.tasks:
             task.allocate(free_cores.pop(0).full_id())
+        self.assigned_jobs[node].add(job.id)
+        self.job_node_pairings[job.id] = node
         self.simulator.schedule(job.tasks)
 
-    def _energy_consumption_reward(self) -> float:
+    def _energy_consumption_reward(self, last_reward=False) -> float:
         energy_incr = self.simulator.energy - self.last_energy
         self.last_energy = self.simulator.energy
+        if last_reward and self.pending_jobs:
+            return -len(self.pending_jobs) * (self.simulator.energy + math.e) * self.PENALTY
         return -energy_incr
 
-    def _edp_reward(self) -> float:
+    def _edp_reward(self, last_reward=False) -> float:
+        if last_reward:
+            return -len(self.pending_jobs) *\
+                (self.simulator.energy * self.simulator.simulation_time + math.e) * self.PENALTY
         makespan = self.simulator.simulation_time - self.last_time
         self.last_time = self.simulator.simulation_time
         return self._energy_consumption_reward() * makespan
 
-    def _get_action_pair(self, action: torch.Tensor) -> tuple:
+    def _get_action_pair(self, action: int) -> tuple:
         # Job-node pairs can be viewed as a matrix
-        action = action.item()
         job = action // self.NUM_NODES
         node = action % self.NUM_NODES
         return job, node
