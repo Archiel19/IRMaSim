@@ -129,6 +129,17 @@ Attributes:
             'low_power': lambda core: core.static_power + core.dynamic_power
         })
 
+        # TODO Marta: these are most probably wrong
+        self.node_selections = OrderedDict({
+            'random': None,
+            'high_gflops': lambda node: - sum([proc.mops_per_core for proc in node.children]) / len(node.children),
+            'high_cores': lambda node: - node.count_idle_cores(),
+            'high_mem': lambda node: - node.current_memory,
+            'high_mem_bw': lambda node: - sum([proc.requested_memory_bandwidth for proc in node.children]),
+            'low_power': lambda node: - sum([core.static_power + core.dynamic_power
+                                             for proc in node.children for core in proc.children])
+        })
+
         self.actions = []
         if 'actions' in self.env_options:
             for sel in self.env_options['actions']['selection']:
@@ -261,8 +272,8 @@ Attributes:
         return makespan
 
     def energy_consumption_reward(self) -> float:
-        energy_incr = self.simulator.energy - self.last_energy
-        self.last_energy = self.simulator.energy
+        energy_incr = self.simulator.total_energy - self.last_energy
+        self.last_energy = self.simulator.total_energy
         return -energy_incr
 
     def edp_reward(self) -> float:

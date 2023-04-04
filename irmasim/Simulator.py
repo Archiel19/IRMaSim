@@ -21,7 +21,8 @@ class Simulator:
         # TODO
         # self.statistics = Statistics(options)
         self.simulation_time = 0
-        self.energy = 0
+        self.total_energy = 0
+        self.used_energy = 0
         self.logger = logging.getLogger("simulator")
 
         self.resource_logger = None
@@ -52,7 +53,8 @@ class Simulator:
         self.simulation_time += first_jobs[0].submit_time
         self.platform.advance(self.simulation_time)
         # TODO do something with joules
-        self.energy = self.platform.get_joules(self.simulation_time)
+        self.total_energy = self.platform.get_joules(self.simulation_time)
+        self.used_energy = self.platform.get_joules_util(self.simulation_time)
         # self.statistics.calculate_energy_and_edp(self.resource_manager.core_pool, self.simulation_time)
         logging.getLogger("irmasim").debug("{} Received job submission: {}".format( \
                 self.simulation_time, ",".join([str(job.id)+"("+job.name+")" for job in first_jobs])))
@@ -70,7 +72,8 @@ class Simulator:
         while delta_time != math.inf:
             if delta_time != 0:
                 self.platform.advance(delta_time)
-                self.energy += self.platform.get_joules(delta_time)
+                self.total_energy += self.platform.get_joules(delta_time)
+                self.used_energy += self.platform.get_joules_util(delta_time)
                 self.simulation_time += delta_time
 
             if delta_time == delta_time_queue:
@@ -267,7 +270,7 @@ class Simulator:
         return klass(self)
 
     def log_state(self):
-        state = [ self.simulation_time, self.energy ]
+        state = [self.simulation_time, self.total_energy, self.used_energy]
         state.extend(self.job_queue.get_job_counts())
 
         for stats in [ self.slowdown_statistics(),
@@ -305,7 +308,7 @@ class Simulator:
         return self.compute_statistics(waiting_time_list)
 
     def energy_consumption_statistics(self) -> dict:
-        return {"total": self.energy}
+        return {"total": self.total_energy, "used": self.used_energy}
 
     def simulation_time_statistics(self) -> dict:
         return {"total": self.simulation_time}

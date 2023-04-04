@@ -10,6 +10,7 @@ class Processor (BasicProcessor):
         self.mops_per_core = config['clock_rate'] * config['dpflops_per_cycle'] * 1e3
         self.requested_memory_bandwidth = 0.0
         self.power_consumption = 0.0
+        self.power_consumption_util = 0.0
         self.max_power_consumption = 0.0
         self.update_power()
 
@@ -32,6 +33,9 @@ class Processor (BasicProcessor):
 
     def get_joules(self, delta_time: float):
         return self.power_consumption * delta_time
+
+    def get_joules_util(self, delta_time: float):
+        return self.power_consumption_util * delta_time
 
     def update_speedup(self):
 
@@ -70,6 +74,8 @@ class Processor (BasicProcessor):
         task_count = sum([1 for core in self.children if core.task is not None])
         if task_count == 0:
             self.power_consumption = sum([(core.min_power*core.static_power) for core in self.children])
+            self.power_consumption_util = 0
         else:
             self.power_consumption = (sum([core.dynamic_power for core in self.children if core.task is not None]) +
                                       sum([core.static_power for core in self.children]))
+            self.power_consumption_util = self.power_consumption
