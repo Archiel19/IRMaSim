@@ -15,7 +15,8 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class EnergyActorCritic:
     def __init__(self, observation_size: tuple, load_agent: bool = True):
-        self.actor = EnergyActorCritic.Actor(observation_size)
+        wait_action = Options().get()['workload_manager']['wait_action']
+        self.actor = EnergyActorCritic.Actor(observation_size, wait_action)
         self.critic = EnergyActorCritic.Critic(observation_size)
         self.buffer = EnergyActorCritic.PPOBuffer()
 
@@ -220,23 +221,27 @@ class EnergyActorCritic:
             return sample_dict
 
     class Actor(nn.Module):
-        def __init__(self, observation_size):
+        def __init__(self, observation_size, wait_action):
             super(EnergyActorCritic.Actor, self).__init__()
-            self.input = nn.Linear(observation_size[1], 64, device=DEVICE)
-            self.hidden_0 = nn.Linear(64, 32, device=DEVICE)
-            self.hidden_1 = nn.Linear(32, 16, device=DEVICE)
-            self.hidden_2 = nn.Linear(16, 8, device=DEVICE)
+            self.input = nn.Linear(observation_size[1], 256, device=DEVICE)
+            self.hidden_1 = nn.Linear(256, 64, device=DEVICE)
+            self.hidden_2 = nn.Linear(64, 32, device=DEVICE)
+            self.hidden_3 = nn.Linear(32, 16, device=DEVICE)
+            self.hidden_4 = nn.Linear(16, 8, device=DEVICE)
             self.output = nn.Linear(8, 1, device=DEVICE)
+            self.wait_action = wait_action
 
         def forward(self, observation: torch.Tensor, act=None) -> Tuple[Any, Any, Any]:
             mask = torch.where(observation.sum(dim=-1) != 0.0, 1.0, 0.0)
-            mask[-1] = 1.0
+            if self.wait_action:
+                mask[-1] = 1.0
             out_0 = nn.functional.gelu(self.input(observation))
-            out_1 = nn.functional.gelu(self.hidden_0(out_0))
-            out_2 = nn.functional.gelu(self.hidden_1(out_1))
-            out_3 = nn.functional.gelu(self.hidden_2(out_2))
-            out_4 = torch.squeeze(self.output(out_3), dim=-1)
-            out = out_4 + (mask - 1) * 1e6
+            out_1 = nn.functional.gelu(self.hidden_1(out_0))
+            out_2 = nn.functional.gelu(self.hidden_2(out_1))
+            out_3 = nn.functional.gelu(self.hidden_3(out_2))
+            out_4 = nn.functional.gelu(self.hidden_4(out_3))
+            out_5 = torch.squeeze(self.output(out_4), dim=-1)
+            out = out_5 + (mask - 1) * 1e6
 
             pi = Categorical(logits=out)
             action = pi.sample() if act is None else act
