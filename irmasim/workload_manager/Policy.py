@@ -19,8 +19,8 @@ class Policy(WorkloadManager):
         if simulator.platform.config["model"] != "modelV1":
             raise Exception("Policy workload manager needs a modelV1 platform")
         options = Options().get()
-        mod = importlib.import_module("irmasim.platform.models." + options["platform_model_name"] + ".Core")
-        klass = getattr(mod, 'Core')
+        mod = importlib.import_module("irmasim.platform.models." + options["platform_model_name"] + ".Node")
+        klass = getattr(mod, 'Node')
         self.resources = self.simulator.get_resources(klass)
         self.pending_jobs = []
         self.running_jobs = []
@@ -106,8 +106,9 @@ class Policy(WorkloadManager):
         logging.getLogger("irmasim").debug("{} performing action {}-{} ({})".format( \
                 self.simulator.simulation_time, key[2], key[3], action))
         self.pending_jobs.sort(key=key[0])
+        '''
         available_resources = [resource for resource in self.resources if resource.task is None]
-        if key[1] != None:
+        if key[1] is not None:
             available_resources.sort(key=key[1])
         while self.pending_jobs and len(self.pending_jobs[0].tasks) <= len(available_resources):
             next_job = self.pending_jobs.pop(0)
@@ -115,6 +116,24 @@ class Policy(WorkloadManager):
                 task.allocate(available_resources.pop(0).full_id())
             self.simulator.schedule(next_job.tasks)
             self.running_jobs.append(next_job)
+        '''
+        while self.pending_jobs:
+            next_job = self.pending_jobs[0]
+            available_resources = [node for node in self.resources if node.count_idle_cores() >= next_job.ntasks]
+            if available_resources:
+                if key[1] is not None:
+                    available_resources.sort(key=key[1])
+                next_node = available_resources[0]
+                free_cores = [core for core in next_node.cores() if core.task is None]
+                i = 0
+                for task in next_job.tasks:
+                    task.allocate(free_cores[i].full_id())
+                    i += 1
+                self.simulator.schedule(next_job.tasks)
+                self.running_jobs.append(next_job)
+                self.pending_jobs.pop(0)
+            else:
+                break
 
     def on_end_simulation(self):
         options = Options().get()

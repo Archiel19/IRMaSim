@@ -115,7 +115,7 @@ Attributes:
             'random': None,
             'first': lambda job: job.submit_time,
             'shortest': lambda job: job.req_time,
-            'smallest': lambda job: job.resources,
+            'smallest': lambda job: job.ntasks,
             'low_mem': lambda job: job.memory,
             'low_mem_ops': lambda job: job.memory_vol
         })
@@ -146,12 +146,12 @@ Attributes:
                 for job_sel, core_sels in sel.items():
                     for core_sel in core_sels:
                         self.actions.append(
-                            (self.job_selections[job_sel], self.core_selections[core_sel], job_sel, core_sel)
+                            (self.job_selections[job_sel], self.node_selections[core_sel], job_sel, core_sel)
                         )
         else:
             for job_sel in self.job_selections.keys():
-                for core_sel in self.core_selections.keys():
-                    self.actions.append((self.job_selections[job_sel], self.core_selections[core_sel], job_sel, core_sel))
+                for core_sel in self.node_selections.keys():
+                    self.actions.append((self.job_selections[job_sel], self.node_selections[core_sel], job_sel, core_sel))
 
         nb_actions = len(self.actions)
         self.action_space = gym.spaces.Discrete(nb_actions)
