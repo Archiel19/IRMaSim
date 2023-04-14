@@ -30,8 +30,9 @@ class Job:
 
     @classmethod
     def from_profile(klass, id: int, name: str, submit_time: float, nodes: int, ntasks: int, ntasks_per_node: int, profile: dict, type: str):
+        max_energy = profile['max_energy'] if 'max_energy' in profile else math.inf
         self=klass(id,name,submit_time, nodes, ntasks, ntasks_per_node, profile['req_ops'], profile['ipc'],
-                   profile['req_time'], profile['mem'], profile['mem_vol'], profile['max_energy'])
+                   profile['req_time'], profile['mem'], profile['mem_vol'], max_energy)
         self.type = type
         self.profile = profile
         return self
