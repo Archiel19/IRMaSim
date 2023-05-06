@@ -5,28 +5,29 @@
   "platform_file": "platform.json",
   "platform_name": "the_platform",
   "output_dir": "energy",
+  "log_resource_type": "Node",
   "workload_manager": {
     "type": "EnergyWM",
+    "wait_action": false,
     "environment": {
       "objective": "energy_consumption",
-      "num_jobs": 8,
-      "num_nodes": 8
+      "num_jobs": 8
     },
     "agent": {
       "name": "EnergyActorCritic",
-      "minibatch_size": 8,
+      "minibatch_size": 2,
       "h_factor": 0.0,
-      "clipping_factor": 0.21,
+      "clipping_factor": 0.23,
       "gamma": 0.99,
       "lambda": 0.95,
       "lr_pi": 0.001,
       "lr_v": 0.03,
       "phase": "train",
-      "train_iters": 20,
+      "train_iters": 60,
       "max_kl": 0.1
     }
   },
-  "nbtrajectories": 5,
+  "nbtrajectories": 1,
   "trajectory_length": 8,
   "trajectory_origin": 0
 }

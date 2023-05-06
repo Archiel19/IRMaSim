@@ -4,16 +4,12 @@
   "platform_file": "platform.json",
   "platform_name": "the_platform",
   "output_dir": "policy",
+  "log_resource_type": "Node",
   "workload_manager": {
     "type": "Policy",
     "environment": {
       "objective": "energy_consumption",
-      "queue_sensitivity": 0.005,
-      "actions": {
-        "selection": [
-          { "first": ["high_gflops", "low_power"] }
-        ]
-      }
+      "queue_sensitivity": 0.005
     },
     "agent": {
       "name": "ActorCritic",
