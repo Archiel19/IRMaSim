@@ -12,7 +12,6 @@ class Processor (BasicProcessor):
         self.power_consumption = 0.0
         self.power_consumption_util = 0.0
         self.max_power_consumption = 0.0
-        self.update_power()
 
     def add_child(self, child: BasicCore):
         super().add_child(child)
@@ -74,7 +73,7 @@ class Processor (BasicProcessor):
         task_count = sum([1 for core in self.children if core.task is not None])
         if task_count == 0:
             self.power_consumption = sum([(core.min_power*core.static_power) for core in self.children])
-            self.power_consumption_util = 0
+            self.power_consumption_util = 0.0
         else:
             self.power_consumption = (sum([core.dynamic_power for core in self.children if core.task is not None]) +
                                       sum([core.static_power for core in self.children]))

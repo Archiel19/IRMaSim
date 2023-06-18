@@ -80,7 +80,7 @@ class ProcessorBuilder(ModelBuilder):
         for i in range(definition["cores"]):
             child = builder.build_resource("core" + str(i), definition)
             resource.add_child(child)
-
+        resource.update_power()
         return resource
 
 
