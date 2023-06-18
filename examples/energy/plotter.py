@@ -2,32 +2,36 @@ import argparse as ap
 import matplotlib.pyplot as plt
 
 
-def plot_losses(exp_dir: str):
+def plot_losses(exp_dir: str, title: str):
     with open(f'{exp_dir}/losses.log', 'r') as l_f:
         losses_pairs = [tuple(map(float, lp.strip().split(','))) for lp in l_f.readlines()]
 
     if len(losses_pairs[0]) == 3:
-        losses = ['pi', 'v', 'total']
+        losses = ['policy', 'value', 'total']
     elif len(losses_pairs[0]) == 2:
-        losses = ['pi', 'v']
+        losses = ['policy', 'value']
     else:
-        losses = ['global']
+        losses = ['Global']
     for i in range(len(losses)):
-        plt.plot([l[i] for l in losses_pairs])
+        plt.title(f'{title} - {losses[i]} loss')
+        plt.plot([l[i] for l in losses_pairs[1:]])
+        plt.xlabel('Simulation')
         plt.savefig(f'{exp_dir}/{losses[i]}_loss.png')
         plt.clf()
 
 
-def plot_rewards(exp_dir: str):
+def plot_rewards(exp_dir: str, title: str):
     with open(f'{exp_dir}/rewards.log', 'r') as r_f:
         rews_pairs = [float(r.strip()) for r in r_f.readlines()]
 
+    plt.title(f'{title} - rewards')
+    plt.xlabel('Simulation')
     plt.plot([r for r in rews_pairs])
     plt.savefig(f'{exp_dir}/rewards.png')
     plt.clf()
 
 
-def plot_resources(exp_dir: str):
+def plot_resources(exp_dir: str, title: str):
     with open(f'{exp_dir}/resources.log', 'r') as r_f:
         lines = [tuple(rl.strip().split(',')) for rl in r_f.readlines()]
         indices = {name: idx for (idx, name) in enumerate(lines[0])}
@@ -47,11 +51,12 @@ def plot_resources(exp_dir: str):
                 break
             chunk_size += 1
             max_capacity += int(get(line, 'cores'))
-        # TODO get the last trajectory only
+        # TODO get the last trajectory only maybe
         timestamps = [float(get(lines[i], 'time')) for i in range(0, len(lines), chunk_size)]
         loads = [sum(map(lambda l: int(get(l, 'busy_cores')), lines[i:i+chunk_size]))
                  for i in range(1, len(lines), chunk_size)]
 
+    plt.title(f'{title} - cluster load')
     plt.plot(timestamps, loads)
     plt.axhline(y=max_capacity, linestyle='dashed', color='r')
     plt.savefig(f'{exp_dir}/resources.png')
@@ -60,15 +65,16 @@ def plot_resources(exp_dir: str):
 
 def do_plots(args):
     if args.loss:
-        plot_losses(args.exp_dir)
+        plot_losses(args.exp_dir, args.title)
     if args.reward:
-        plot_rewards(args.exp_dir)
-    plot_resources(args.exp_dir)
+        plot_rewards(args.exp_dir, args.title)
+    plot_resources(args.exp_dir, args.title)
 
 
 if __name__ == '__main__':
     parser = ap.ArgumentParser('Creates some plots with the results on the log files')
     parser.add_argument('-d', '--exp-dir', type=str, default='')
+    parser.add_argument('-t', '--title', type=str, default='')
     parser.add_argument('-l', '--loss', default=False, action=ap.BooleanOptionalAction)
     parser.add_argument('-r', '--reward', default=False, action=ap.BooleanOptionalAction)
     args = parser.parse_args()

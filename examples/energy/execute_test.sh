@@ -58,22 +58,23 @@ rm -f {energy,policy,action,low_power,high_gflops,high_cores}/*
 
 # Execution
 if [ "$energy_only" != "true" ]; then
-  printf 'Low power heuristic\n'
-  irmasim "$prev_dir"/options_low_power.json
-  printf '\nHigh gflops heuristic\n'
-  irmasim "$prev_dir"/options_high_gflops.json
-  printf '\nHigh cores heuristic\n'
-  irmasim "$prev_dir"/options_high_cores.json
-  AGENTS=("policy" "action")
-  for type in "${AGENTS[@]}"; do
-    printf "\n%s agent\n" "$type"
-    irmasim -nr "$iters" -im "$type"_agent.model -om "$type"_agent.model options_"$type".json --phase "$phase"
-    ${PYTHON} "$prev_dir"/plotter.py -d "$type" ${plot_opt}
-  done
+  HEURISTICS=("low_power" "high_gflops" "high_cores")
+  AGENTS=("policy" "energy")
+else
+  HEURISTICS=()
+  AGENTS=("energy")
 fi
 
-printf '\nEnergy agent\n'
-irmasim -nr "$iters" -im energy_agent.model -om energy_agent.model options_energy.json --phase "$phase"
-${PYTHON} "$prev_dir"/plotter.py -d energy ${plot_opt}
+for type in "${HEURISTICS[@]}"; do
+  printf "\n%s heuristic\n" "$type"
+  irmasim "$prev_dir"/options_"$type".json
+  ${PYTHON} "$prev_dir"/plotter.py -t "$type heuristic" -d "$type" ${plot_opt}
+done
+
+for type in "${AGENTS[@]}"; do
+  printf "\n%s agent\n" "$type"
+  irmasim -nr "$iters" -im "$type"_agent.model -om "$type"_agent.model options_"$type".json --phase "$phase"
+  ${PYTHON} "$prev_dir"/plotter.py -t "$type agent" -d "$type" ${plot_opt}
+done
 
 cd "$prev_dir" || exit 1

@@ -1,0 +1,131 @@
+{
+  "node": {
+    "node_48_3.0": {
+      "id": "node_48_3.0",
+      "processors": [
+        {
+          "count": 1,
+          "type": "proc_48_3.0"
+        }
+      ]
+    },
+    "node_8_4.2": {
+      "id": "node_8_4.2",
+      "processors": [
+        {
+          "count": 1,
+          "type": "proc_8_4.2"
+        }
+      ]
+    },
+    "node_16_3.8": {
+      "id": "node_16_3.8",
+      "processors": [
+        {
+          "count": 1,
+          "type": "proc_16_3.8"
+        }
+      ]
+    },
+    "node_32_3.4": {
+      "id": "node_32_3.4",
+      "processors": [
+        {
+          "count": 1,
+          "type": "proc_32_3.4"
+        }
+      ]
+    }
+  },
+  "platform": {
+    "the_platform": {
+      "clusters": [
+        {
+          "nodes": [
+            {
+              "type": "node_8_4.2",
+              "number": 10
+            },
+            {
+              "type": "node_16_3.8",
+              "number": 10
+            },
+            {
+              "type": "node_32_3.4",
+              "number": 10
+            },
+            {
+              "type": "node_48_3.0",
+              "number": 10
+            }
+          ],
+          "id": "cluster0"
+        }
+      ],
+      "id": "the_platform",
+      "model_name": "modelV1"
+    }
+  },
+  "processor": {
+    "proc_16_3.8": {
+      "dd": 100,
+      "db": 169,
+      "dc": 25000,
+      "da": 1.0,
+      "dpflops_per_cycle": 1,
+      "id": "proc_16_3.8",
+      "c": 21000,
+      "b": -1.85e-05,
+      "dynamic_power": 5.315524444444445,
+      "static_power": 56.32883555555555,
+      "clock_rate": 3.8,
+      "min_power": 0.3959,
+      "cores": 16
+    },
+    "proc_32_3.4": {
+      "dd": 20,
+      "db": 150,
+      "dc": 25000,
+      "da": 1.0,
+      "dpflops_per_cycle": 1,
+      "id": "proc_32_3.4",
+      "c": 21000,
+      "b": -1.85e-05,
+      "dynamic_power": 4.255364444444444,
+      "static_power": 45.09427555555555,
+      "clock_rate": 3.4,
+      "min_power": 0.3959,
+      "cores": 32
+    },
+    "proc_48_3.0": {
+      "dd": 10,
+      "db": 100,
+      "dc": 25000,
+      "da": 1.0,
+      "dpflops_per_cycle": 1,
+      "id": "proc_48_3.0",
+      "c": 21000,
+      "b": -1.85e-05,
+      "dynamic_power": 3.313,
+      "static_power": 35.108,
+      "clock_rate": 3.0,
+      "min_power": 0.3959,
+      "cores": 48
+    },
+    "proc_8_4.2": {
+      "dd": 500,
+      "db": 500,
+      "dc": 25000,
+      "da": 1.0,
+      "dpflops_per_cycle": 1,
+      "id": "proc_8_4.2",
+      "c": 32000,
+      "b": -1.85e-05,
+      "dynamic_power": 6.493480000000002,
+      "static_power": 68.81168000000001,
+      "clock_rate": 4.2,
+      "min_power": 0.3959,
+      "cores": 8
+    }
+  }
+}

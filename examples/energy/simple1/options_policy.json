@@ -1,0 +1,22 @@
+{
+  "seed": 1995,
+  "workload_file": "workload.json",
+  "platform_file": "platform.json",
+  "platform_name": "the_platform",
+  "output_dir": "policy",
+  "log_resource_type": "Node",
+  "workload_manager": {
+    "type": "Policy",
+    "environment": {
+      "objective": "energy_consumption",
+      "queue_sensitivity": 0.005
+    },
+    "agent": {
+      "name": "ActorCritic",
+      "gamma": 0.99,
+      "lr": 0.5,
+      "hidden": 16,
+      "phase": "train"
+    }
+  }
+}

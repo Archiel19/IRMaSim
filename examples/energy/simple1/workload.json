@@ -1,0 +1,17 @@
+{
+ "nb_res": 16,
+ "jobs": [
+    { "subtime": 0, "res": 4, "profile": "A"},
+    { "subtime": 0.05, "res": 4, "profile": "A"},
+    { "subtime": 0.10, "res": 2, "profile": "B"},
+    { "subtime": 0.15, "res": 4, "profile": "A"},
+    { "subtime": 0.20, "res": 2, "profile": "B"},
+    { "subtime": 0.25, "res": 4, "profile": "A"}
+ ],
+ "profiles": {
+    "B": {"type": "parallel_homogeneous", "com": 50, "req_time": 25, "req_ops": 62500000000,
+      "mem": 100, "mem_vol": 1e6, "ipc": 1},
+    "A": {"type":  "parallel_homogeneous", "com": 50, "req_time": 5.5, "req_ops":  12500000000,
+      "mem": 100, "mem_vol": 1, "ipc": 1}
+ }
+}

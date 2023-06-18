@@ -1,0 +1,31 @@
+{
+ "nb_res": 100,
+ "jobs": [
+    { "subtime": 0.00, "res": 8, "profile": "A"},
+    { "subtime": 0.05, "res": 8, "profile": "A"},
+    { "subtime": 0.10, "res": 8, "profile": "A"},
+    { "subtime": 0.15, "res": 8, "profile": "A"},
+    { "subtime": 0.20, "res": 8, "profile": "A"},
+    { "subtime": 0.25, "res": 8, "profile": "A"},
+    { "subtime": 0.30, "res": 8, "profile": "A"},
+    { "subtime": 0.35, "res": 8, "profile": "A"},
+    { "subtime": 0.40, "res": 8, "profile": "A"},
+    { "subtime": 0.45, "res": 8, "profile": "A"},
+    { "subtime": 0.50, "res": 8, "profile": "A"},
+    { "subtime": 0.55, "res": 8, "profile": "A"},
+    { "subtime": 0.60, "res": 8, "profile": "A"},
+    { "subtime": 0.65, "res": 8, "profile": "A"},
+    { "subtime": 0.70, "res": 4, "profile": "C"},
+    { "subtime": 0.75, "res": 4, "profile": "C"},
+    { "subtime": 0.80, "res": 8, "profile": "B"},
+    { "subtime": 0.85, "res": 8, "profile": "B"}
+ ],
+ "profiles": {
+    "A": {"type":  "parallel_homogeneous", "com": 50, "req_time": 4.6, "req_ops":  13750000000,
+      "mem": 100, "mem_vol": 1, "ipc": 1},
+    "B": {"type": "parallel_homogeneous", "com": 50, "req_time": 20.8, "req_ops": 62500000000,
+      "mem": 100, "mem_vol": 1e3, "ipc": 1},
+    "C": {"type": "parallel_homogeneous", "com": 100, "req_time": 41.7, "req_ops": 125000000000,
+      "mem": 100, "mem_vol": 1e6, "ipc": 1}
+ }
+}

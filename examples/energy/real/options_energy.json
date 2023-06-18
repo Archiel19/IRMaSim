@@ -14,17 +14,17 @@
       "num_jobs": 256
     },
     "agent": {
+      "swa": true,
       "name": "EnergyActorCritic",
-      "minibatch_size": 256,
+      "minibatch_size": 64,
       "h_factor": 0.0,
-      "clipping_factor": 0.23,
+      "clipping_factor": 0.1,
       "gamma": 0.99,
       "lambda": 0.95,
-      "lr_pi": 0.1,
-      "lr_v": 0.1,
+      "lr_pi": 0.001,
+      "lr_v": 0.01,
       "phase": "train",
-      "train_iters": 30,
-      "max_kl": 0.1
+      "train_iters": 50
     }
   },
   "nbtrajectories": 5,

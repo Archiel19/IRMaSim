@@ -6,7 +6,7 @@ of a series of heuristics and intelligent agents when it comes to reducing energ
 More specifically, the following are tested:
 * __low_power__: assigns the next job in the queue to the processor with the least power.
 * __high_gflops__: assigns the next job in the queue to the processor with the highest gflops.
-* __high_gflops__: assigns the next job in the queue to the processor with the highest number of cores.
+* __high_cores__: assigns the next job in the queue to the processor with the most available cores.
 * __policy__: RL-based agent which attempts to select the best policy for scheduling the given trace. The policy is itself comprised
 by both a job selection policy and a node selection policy.
 * __action__: RL-based agent which attempts to choose the best job-node assignment at each scheduling
