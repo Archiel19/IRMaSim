@@ -1,4 +1,3 @@
-import importlib
 import logging
 import torch
 from irmasim.workload_manager.WorkloadManager import WorkloadManager
@@ -20,13 +19,10 @@ class EnergyWM(WorkloadManager):
         if simulator.platform.config["model"] != "modelV1":
             raise Exception("EnergyWM workload manager needs a modelV1 platform")
         self.options = Options().get()
-        mod = importlib.import_module("irmasim.platform.models." + self.options["platform_model_name"] + ".Node")
-        klass = getattr(mod, 'Node')
-
-        self.resources = self.simulator.get_resources(klass)
 
         # DRL-related attributes
-        self.environment = EnergyEnvironment(self, simulator)
+        self.trajectory_start = True
+        self.environment = EnergyEnvironment(simulator)
         self.agent = EnergyActorCritic(self.environment.observation_size)
 
     def on_job_submission(self, jobs: list):
@@ -40,19 +36,27 @@ class EnergyWM(WorkloadManager):
 
     def on_end_step(self):
         if self.environment.can_schedule():
-            self.agent.reward_last_action(self.environment.reward())
+            if self.trajectory_start:
+                self.trajectory_start = False  # The next rewards will be stored
+            else:
+                self.agent.reward_last_action(self.environment.reward())
             observation = self.environment.get_obs()
             action, value, logp = self.agent.decide(observation)
             self.environment.apply_action(action)
 
             # Rewards can only be computed after the simulator has applied the action,
             # so there's a separate function in the agent to reward the last taken action
-            self.agent.buffer.store(observation, action, value, logp)
+            self.agent.store(observation, action, value, logp)
+
+    def on_alarm(self):
+        print("ENERGY WM ON ALARM")
+        self.on_end_step()
 
     def on_end_trajectory(self):
         logging.getLogger('irmasim').debug(f'{self.simulator.simulation_time} - Ending trajectory')
         self.agent.on_end_trajectory(self.environment.reward(last_reward=True))
         self.environment.reset()
+        self.trajectory_start = True
 
     def on_end_simulation(self):
         phase = self.options['workload_manager']['agent']['phase']
@@ -72,3 +76,7 @@ class EnergyWM(WorkloadManager):
                 }, out_model)
         with open(f'{out_dir}/rewards.log', 'a+') as out_f:
             out_f.write(f'{self.agent.total_rewards}\n')
+        with open(f'{out_dir}/edp.log', 'a+') as out_f:
+            out_f.write(f'{self.simulator.total_energy * self.simulator.simulation_time}\n')
+        with open(f'{out_dir}/energy.log', 'a+') as out_f:
+            out_f.write(f'{self.simulator.total_energy}\n')
