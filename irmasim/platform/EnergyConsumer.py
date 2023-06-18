@@ -5,3 +5,6 @@ class EnergyConsumer:
 
     def get_joules(self, delta_time: float):
         pass
+
+    def get_joules_util(self, delta_time: float):
+        pass
