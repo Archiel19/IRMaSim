@@ -20,6 +20,9 @@ class WorkloadManager:
     def on_end_step(self):
         pass
 
+    def on_alarm(self):
+        pass
+
     def on_end_trajectory(self):
         pass
 

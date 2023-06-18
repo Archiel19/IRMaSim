@@ -24,6 +24,7 @@ class Simulator:
         self.total_energy = 0
         self.used_energy = 0
         self.logger = logging.getLogger("simulator")
+        self.alarm = math.inf
 
         self.resource_logger = None
         options = Options().get()
@@ -66,8 +67,8 @@ class Simulator:
         delta_time_platform = self.platform.get_next_step()
         # TODO unify get_next_step return value
         delta_time_queue = self.job_queue.get_next_step() - self.simulation_time
-
-        delta_time = min([delta_time_platform, delta_time_queue])
+        delta_time_alarm = self.alarm - self.simulation_time
+        delta_time = min([delta_time_platform, delta_time_queue, delta_time_alarm])
 
         while delta_time != math.inf:
             if delta_time != 0:
@@ -94,10 +95,15 @@ class Simulator:
             if delta_time == delta_time_queue or delta_time == delta_time_platform:
                 self.workload_manager.on_end_step()
 
+            if delta_time == delta_time_alarm:
+                self.unset_alarm()
+                self.workload_manager.on_alarm()
+
             delta_time_platform = self.platform.get_next_step()
             # TODO unify get_next_step return value
             delta_time_queue = self.job_queue.get_next_step() - self.simulation_time
-            delta_time = min([delta_time_platform, delta_time_queue])
+            delta_time_alarm = self.alarm - self.simulation_time
+            delta_time = min([delta_time_platform, delta_time_queue, delta_time_alarm])
             self.log_state()
 
     def schedule(self, tasks: list):
@@ -110,6 +116,12 @@ class Simulator:
                 self.platform.schedule(task, task.resource[1:])
             else:
                 raise Exception(f"Resource {task.resource} does not belong to platform {self.platform.id}")
+
+    def set_alarm(self, interval: float):
+        self.alarm = self.simulation_time + interval
+
+    def unset_alarm(self):
+        self.alarm = math.inf
 
     def reap(self, tasks: list):
         for task in tasks:
@@ -249,6 +261,8 @@ class Simulator:
                     job['ntasks'] = job['nodes'] * job['ntasks_per_node']
                 else:
                     job['ntasks_per_node'] = math.ceil(job['ntasks']/job['nodes'])
+            if 'max_energy' not in job:
+                job['max_energy'] = math.inf
             if 'profile' in job:
                 job_queue.add_job(
                 Job.from_profile(job_id, job['id'], job['subtime']-first_job_subtime + simulation_time, job['nodes'], job['ntasks'], job['ntasks_per_node'],
@@ -256,7 +270,7 @@ class Simulator:
             else:
                 job_queue.add_job(
                 Job(job_id, job['id'], job['subtime']-first_job_subtime + simulation_time, job['nodes'], job['ntasks'], job['ntasks_per_node'],
-                    job['req_ops'], job['ipc'], job['req_time'], job['mem'], job['mem_vol']))
+                    job['req_ops'], job['ipc'], job['req_time'], job['mem'], job['mem_vol'], job['max_energy']))
             job_id += 1
 
         return job_queue
@@ -308,7 +322,7 @@ class Simulator:
         return self.compute_statistics(waiting_time_list)
 
     def energy_consumption_statistics(self) -> dict:
-        return {"total": self.total_energy, "used": self.used_energy}
+        return {"total": self.total_energy, "used": self.used_energy, "edp": self.total_energy * self.simulation_time}
 
     def simulation_time_statistics(self) -> dict:
         return {"total": self.simulation_time}
