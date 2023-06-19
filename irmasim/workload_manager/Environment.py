@@ -125,19 +125,18 @@ Attributes:
             'high_gflops': lambda core: - core.parent.mops_per_core,
             'high_cores': lambda core: - core.parent.parent.count_idle_cores(),
             'high_mem': lambda core: - core.parent.parent.current_memory,
-            'high_mem_bw': lambda core: core.parent.requested_memory_bandwidth,
+            'high_mem_bw': lambda core: - core.parent.requested_memory_bandwidth,
             'low_power': lambda core: core.static_power + core.dynamic_power
         })
 
-        # TODO Marta: these are most probably wrong
         self.node_selections = OrderedDict({
             'random': None,
             'high_gflops': lambda node: - sum([proc.mops_per_core for proc in node.children]) / len(node.children),
             'high_cores': lambda node: - node.count_idle_cores(),
             'high_mem': lambda node: - node.current_memory,
             'high_mem_bw': lambda node: - sum([proc.requested_memory_bandwidth for proc in node.children]),
-            'low_power': lambda node: - sum([core.static_power + core.dynamic_power
-                                             for proc in node.children for core in proc.children])
+            'low_power': lambda node: sum([core.static_power + core.dynamic_power
+                                            for proc in node.children for core in proc.children])
         })
 
         self.actions = []
