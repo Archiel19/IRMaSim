@@ -12,7 +12,12 @@ if TYPE_CHECKING:
 
 class EnergyWM(WorkloadManager):
     """
-    Actor-critic architecture focused on minimizing energy expenditure etc etc
+    Energy scheduler.
+
+    Implements an intelligent actor-critic reinforcement learning agent devoted to minimizing energy consumption
+    or EDP making use of the power specifications of the resources and an enegy estimate.
+
+    This class is mainly responsible for coordinating calls between EnergyActorCritic and EnergyEnvironment.
     """
     def __init__(self, simulator: 'Simulator'):
         super(EnergyWM, self).__init__(simulator)
@@ -20,7 +25,7 @@ class EnergyWM(WorkloadManager):
             raise Exception("EnergyWM workload manager needs a modelV1 platform")
         self.options = Options().get()
 
-        # DRL-related attributes
+        # RL-related attributes
         self.trajectory_start = True
         self.environment = EnergyEnvironment(simulator)
         self.agent = EnergyActorCritic(self.environment.observation_size)
@@ -37,19 +42,18 @@ class EnergyWM(WorkloadManager):
     def on_end_step(self):
         if self.environment.can_schedule():
             if self.trajectory_start:
-                self.trajectory_start = False  # The next rewards will be stored
+                # Set flag so that the next rewards will be stored
+                self.trajectory_start = False
             else:
+                # Rewards can only be computed after the simulator has applied the previous action
                 self.agent.reward_last_action(self.environment.reward())
+
             observation = self.environment.get_obs()
             action, value, logp = self.agent.decide(observation)
             self.environment.apply_action(action)
-
-            # Rewards can only be computed after the simulator has applied the action,
-            # so there's a separate function in the agent to reward the last taken action
             self.agent.store(observation, action, value, logp)
 
     def on_alarm(self):
-        print("ENERGY WM ON ALARM")
         self.on_end_step()
 
     def on_end_trajectory(self):
@@ -61,8 +65,9 @@ class EnergyWM(WorkloadManager):
     def on_end_simulation(self):
         phase = self.options['workload_manager']['agent']['phase']
         out_dir = self.options['output_dir']
+
         if phase == 'train':
-            # Compute losses
+            # Train actor and critic for the specified number of epochs/iterations
             losses = self.agent.training_step()
             with open(f'{out_dir}/losses.log', 'a+') as out_f:
                 out_f.write(f'{losses[0]}, {losses[1]}\n')

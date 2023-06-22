@@ -1,50 +1,52 @@
 import importlib
 import gym
 import logging
-
 import torch
-from gym import spaces
 import numpy as np
+from gym import spaces
 from irmasim.Simulator import Simulator
 from irmasim.Options import Options
 
 
 class EnergyEnvironment:
     """
-    Acts as a proxy of the simulated instance of the cluster.
+    Energy scheduler environment. Includes methods to get observations and rewards, apply actions,
+    determine if a job can be scheduled and to estimate the energy consumption of a job on a given node.
 
     Observation space: [NUM_JOBS * NUM_NODES, NUM_FEATURES]
-    Action space: [NUM_JOBS * NUM_NODES]
+    Action space: [NUM_JOBS * NUM_NODES]  (+ 1 if wait action enabled)
 
     Features considered for each job-node pair:
 
-    Job features:
-    - Submit time
-    - Number of requested cores
-    - Requested time
-    - Wait time
+           JOB       |         NODE         |      COMMON
+    -------------------------------------------------------------
+    Wait time        |  Availability        |  Energy estimate
+    Requested time   |  Static power        |
+    Submit time      |  Dynamic power       |
+    Requested cores  |  Average clock rate  |
 
-    Node features:
-    - Availability = Free processors / Total processors
-    - Static power
-    - Dynamic power
-    - Clock rate
+    Implemented objectives:
+    - Energy consumption
+    - EDP
     """
 
     def __init__(self, simulator: Simulator):
-        super(EnergyEnvironment, self).__init__()
+
+        # Initialize simulator, options and resources
         self.simulator = simulator
         self.options = Options().get()
         env_options = self.options["workload_manager"]["environment"]
         mod = importlib.import_module("irmasim.platform.models." + self.options["platform_model_name"] + ".Node")
         klass = getattr(mod, 'Node')
         self.resources = self.simulator.get_resources(klass)
-        self.NUM_NODES = len(self.resources)
-        self.NUM_JOBS = env_options["num_jobs"]
-        self.OBS_FEATURES = 9
+
+        # Environment state variables
+        self.last_total_energy = 0.0
+        self.last_used_energy = 0.0
+        self.last_time = 0.0
         self.pending_jobs = []
 
-        # Static node attributes
+        # Constant node attributes
         self.static_power = dict.fromkeys(self.resources)
         self.idle_power = dict.fromkeys(self.resources)
         self.clock_rate = dict.fromkeys(self.resources)
@@ -57,22 +59,20 @@ class EnergyEnvironment:
             self.assigned_jobs[node] = set()
         self.f_min = min(self.clock_rate.values())
 
-        # Action space (match a job with a node)
+        # Constants
+        self.NUM_NODES = len(self.resources)
+        self.NUM_JOBS = env_options["num_jobs"]
+        self.OBS_FEATURES = 9
         wait_action = 1 if self.options["workload_manager"]["wait_action"] else 0
-        self.action_space = spaces.Discrete(self.NUM_JOBS * self.NUM_NODES + wait_action) # + 1 for 'wait'
+        self.WAIT_ACTION = self.actions_size[0] - 1 if wait_action else -1
 
-        # Observation space
+        # Observation and action spaces
+        self.action_space = spaces.Discrete(self.NUM_JOBS * self.NUM_NODES + wait_action)
         self.observation_space = gym.spaces.Box(low=0.0, high=1.0,
                                                 shape=(self.actions_size[0], self.OBS_FEATURES),
                                                 dtype=np.float32)
 
-        # Extra action
-        self.WAIT_ACTION = self.actions_size[0] -1 if wait_action else -1
-
         # Set reward function
-        self.last_total_energy = 0.0
-        self.last_used_energy = 0.0
-        self.last_time = 0.0
         reward_dict = {
             'energy_consumption': self._energy_consumption_reward,
             'edp': self._edp_reward
@@ -85,25 +85,23 @@ class EnergyEnvironment:
 
     def get_obs(self) -> torch.Tensor:
         """
-        Job attributes: (stay the same)
-        - Number of requested processors (cores?)
-        - Requested time
-        - Submit time
-        - Wait time
+        Crafts and returns a normalized observation with the following features for each job-node pair:
 
-        Node attributes:
-        - Free processors / total processors
-        - Static power
-        - Dynamic power
-        - Clock rate
+               JOB       |         NODE         |      COMMON
+        -------------------------------------------------------------
+        Wait time        |  Availability        |  Energy estimate
+        Requested time   |  Static power        |
+        Submit time      |  Dynamic power       |
+        Requested cores  |  Average clock rate  |
         """
         observation = np.zeros(self.observation_size, dtype=np.float64)
         for j, job in enumerate(self.pending_jobs[:self.NUM_JOBS]):
             wait_time = self.simulator.simulation_time - job.submit_time
             job_obs = [wait_time, job.req_time, job.submit_time, job.ntasks]
             for n, node in enumerate(self.resources):
-                available_cores = node.count_idle_cores()
                 obs = []
+                # Check if combination is valid
+                available_cores = node.count_idle_cores()
                 if job.ntasks <= available_cores:
                     energy_est = self.energy_estimate(job, node)
                     if energy_est <= job.max_energy:
@@ -122,24 +120,27 @@ class EnergyEnvironment:
             observation = np.divide(observation, norm_sum)
         return torch.Tensor(observation)
 
-    def reset(self):
+    def reset(self) -> None:
         self.last_total_energy = 0.0
         self.last_used_energy = 0.0
         self.last_time = 0.0
         self.pending_jobs = []
 
-    def add_jobs(self, jobs):
+    def add_jobs(self, jobs) -> None:
         self.pending_jobs += jobs
 
-    def finish_jobs(self, finished_jobs):
+    def finish_jobs(self, finished_jobs) -> None:
         for job in finished_jobs:
             node = self.job_node_pairings[job.id]
             self.assigned_jobs[node].remove(job.id)
             del self.job_node_pairings[job.id]
 
-    def can_schedule(self):
+    def can_schedule(self) -> bool:
+        """
+        Determines if any job can be scheduled in the current state of the cluster.
+        """
         for job in self.pending_jobs[:self.NUM_JOBS]:
-            # Don't change condition order
+            # Do not change condition order
             suitable_nodes = [node for node in self.resources
                               if node.count_idle_cores() >= job.ntasks
                               and self.energy_estimate(job, node) <= job.max_energy]
@@ -147,30 +148,48 @@ class EnergyEnvironment:
                 return True
         return False
 
-    def energy_estimate(self, job, node):
+    def energy_estimate(self, job, node) -> float:
+        """
+        Computes an estimate of the energy that will be consumed by scheduling the given job
+        on the given node.
+
+        Should only be called after making sure enough cores are available to schedule the job,
+        otherwise the result will be inaccurate.
+        """
         f = self.clock_rate[node]
         t_est = (self.f_min / f) * job.req_time
 
         num_jobs = len(self.assigned_jobs[node]) + 1  # + 1 for the target job
         s_power = self.static_power[node] / num_jobs
 
+        # Not really necessary, all cores have the same power consumption currently
         free_cores = [core for core in node.cores() if not core.task]
         d_power = sum([core.dynamic_power for core in free_cores[:job.ntasks]])
 
         return t_est * (s_power + d_power)
 
     def apply_action(self, action: int) -> None:
+        """
+        Applies the specified action to the simulated instance of the cluster.
+
+        action: action chosen by the agent, encoded as an integer.
+        """
+
+        # If the agent chose to wait, set the timer and return
         if action == self.WAIT_ACTION:
             logging.getLogger("irmasim").debug(f"{self.simulator.simulation_time} waiting...")
             self.simulator.set_alarm(1.0)
             return
+
+        # Otherwise, disable any possibly existing alarms and schedule the job on the node
         self.simulator.unset_alarm()
         job_idx, node_idx = self._get_action_pair(action)
-        if job_idx >= len(self.pending_jobs):
-            print(f'Job: {job_idx}, node: {node_idx}, len pending: {len(self.pending_jobs)}')
         logging.getLogger("irmasim").debug(
             f"{self.simulator.simulation_time} performing action Job({job_idx})-Node({node_idx}) ({action})")
 
+        # The mask may fail at times when the difference in probability is not enough
+        assert job_idx < len(self.pending_jobs), f"Job index out of range.\nJob: {job_idx}, node: {node_idx}, " \
+                                                 f"len pending: {len(self.pending_jobs)}"
         job = self.pending_jobs.pop(job_idx)
         node = self.resources[node_idx]
         free_cores = [core for core in node.cores() if core.task is None]
@@ -184,17 +203,29 @@ class EnergyEnvironment:
         self.job_node_pairings[job.id] = node
         self.simulator.schedule(job.tasks)
 
-    def _update_reward_vars(self):
+    def _update_markers(self) -> None:
+        """
+        Updates the time and energy consumption markers with the current values
+        provided by the simulator.
+
+        Should be called every time a reward is computed.
+        """
         self.last_total_energy = self.simulator.total_energy
         self.last_used_energy = self.simulator.used_energy
         self.last_time = self.simulator.simulation_time
 
     def _energy_consumption_reward(self, last_reward=False) -> float:
+        """
+        last_reward: may be used to set a different reward for the last time step.
+        """
         total_energy_incr = self.simulator.total_energy - self.last_total_energy
-        self._update_reward_vars()
+        self._update_markers()
         return -total_energy_incr
 
     def _edp_reward(self, last_reward=False) -> float:
+        """
+        last_reward: may be used to set a different reward for the last time step.
+        """
         makespan = self.simulator.simulation_time - self.last_time
         return self._energy_consumption_reward(last_reward) * makespan
 

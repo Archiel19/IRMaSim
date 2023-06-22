@@ -1,11 +1,9 @@
 import numpy as np
-from typing import Tuple, Any
-
-from irmasim.Options import Options
-from scipy.signal import lfilter
 import os.path as path
 import torch
 import torch.nn as nn
+from irmasim.Options import Options
+from scipy.signal import lfilter
 from torch.distributions import Categorical
 from torch.optim.swa_utils import AveragedModel, SWALR
 
@@ -14,41 +12,57 @@ BUFFER_SIZE_MPLIER = 5
 
 
 def init_weights(module):
+    """
+    Used to initialize the weights of the actor and critic networks.
+    """
     if isinstance(module, nn.Linear):
         module.weight.data.normal_(mean=0.0, std=1.0)
         if module.bias is not None:
             module.bias.data.zero_()
 
 class EnergyActorCritic:
+    """
+    Implements the decision-making module (agent) of the Energy scheduler using Proximal Policy Optimization.
+
+    - Actor and critic are self-normalizing neural networks.
+    - Adam optimization is used.
+    - Stochastic Weight Averaging may be enabled.
+    - The scheduler may choose to wait even when enough resources are available to schedule a job,
+      if this option is enabled.
+    """
     def __init__(self, observation_size: tuple, load_agent: bool = True):
+
+        # Initialize actor, critic and buffer
+        self.agent_options = Options().get()['workload_manager']['agent']
+        lam = self.agent_options['lambda']
+        gamma = self.agent_options['gamma']
         wait_action = Options().get()['workload_manager']['wait_action']
         buffer_size = Options().get()['nbtrajectories'] * Options().get()['trajectory_length']
         if wait_action:
             buffer_size *= BUFFER_SIZE_MPLIER
-        self.buffer = PPOBuffer(observation_size, buffer_size)
+        self.buffer = PPOBuffer(observation_size, buffer_size, lam, gamma)
         self.actor = EnergyActorCritic.Actor(observation_size, wait_action)
         self.critic = EnergyActorCritic.Critic(observation_size)
 
-        self.agent_options = Options().get()['workload_manager']['agent']
-        self.lam = self.agent_options['lambda']
-        self.gamma = self.agent_options['gamma']
-        self.swa_on = False
-        if 'swa' in self.agent_options:
-            self.swa_on = self.agent_options['swa']
-
+        # Initialize actor and critic optimizers
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=float(self.agent_options['lr_pi']))
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=float(self.agent_options['lr_v']))
 
-        # For Stochastic Weight Averaging
-        lr_pi = float(self.agent_options['lr_pi'])
-        iters = int(self.agent_options['train_iters'])
-        self.SWA_START_PC = 0.75
-        self.swa_start_epoch = int(self.SWA_START_PC * iters)
+
+        # Configure Stochastic Weight Averaging
+        self.swa_on = False
         self.actor_swa_model = None
-        self.actor_swa_scheduler = SWALR(self.actor_optimizer,
-                                         anneal_strategy="linear",
-                                         anneal_epochs=int(0.15 * iters),
-                                         swa_lr=lr_pi)
+        self.SWA_START_PC = 0.75
+        self.SWA_ANNEALING_PC = 0.15
+        if 'swa' in self.agent_options and self.agent_options['swa']:
+            self.swa_on = self.agent_options['swa']
+            lr_pi = float(self.agent_options['lr_pi'])
+            iters = int(self.agent_options['train_iters'])
+            self.swa_start_epoch = int(self.SWA_START_PC * iters)
+            self.actor_swa_scheduler = SWALR(self.actor_optimizer,
+                                             anneal_strategy="linear",
+                                             anneal_epochs=int(self.SWA_ANNEALING_PC * iters),
+                                             swa_lr=lr_pi)
 
         if 'input_model' in self.agent_options \
                 and path.isfile(self.agent_options['input_model']) and load_agent:
@@ -61,44 +75,45 @@ class EnergyActorCritic:
             self.actor_optimizer.load_state_dict(checkpoint['optimizer_state_dict']['pi'])
             self.critic_optimizer.load_state_dict(checkpoint['optimizer_state_dict']['v'])
 
-
-
-    def state_dict(self):
+    def state_dict(self) -> dict:
         return {
             'actor': self.actor_swa_model.state_dict() if self.actor_swa_model else self.actor.state_dict(),
             'critic': self.critic.state_dict()
         }
 
-    def load_state_dict(self, state_dict: dict):
+    def load_state_dict(self, state_dict: dict) -> None:
         self.actor.load_state_dict(state_dict['actor'], strict=False)
         self.critic.load_state_dict(state_dict['critic'])
 
-    def store(self, observation, action, value, logp, reward=0):
+    def store(self, observation, action, value, logp, reward=0) -> None:
         self.buffer.store(observation, action, value, logp, reward)
 
     def decide(self, observation: torch.Tensor) -> tuple:
-        with torch.no_grad():  # Grad will be used when computing losses, but not when generating training data
+        # Gradient information is not necessary when generating training data
+        with torch.no_grad():
             action, logp_action, _ = self.actor.forward(observation.to(DEVICE))
             value = self.critic.forward(observation.to(DEVICE))
         return action.item(), value.item(), logp_action.item()
 
     @property
-    def total_rewards(self):
+    def total_rewards(self) -> float:
+        # For the last trajectory only
         return self.buffer.total_rewards
 
-    def reward_last_action(self, reward):
+    def reward_last_action(self, reward) -> None:
         self.buffer.store_past_reward(reward)
 
-    def on_end_trajectory(self, last_reward):
-        self.buffer.on_end_trajectory(self.gamma, self.lam, last_reward)
-
-    def training_step(self):
+    def on_end_trajectory(self, last_reward) -> None:
         """
-        Training step, executed after each simulation.
+        Computes advantages and expected returns in the buffer.
+        """
+        self.buffer.on_end_trajectory(last_reward)
 
-        Uses Adam optimizers for both actor and critic. The collected data is
-        divided into minibatches for training.
-        Implements a dynamic learning rate and stochastic weight averaging.
+    def training_step(self) -> np.array:
+        """
+        Updates the parameters of the actor and critic networks based on the collected training data.
+
+        Returns: the mean actor and critic losses during the current training simulation.
         """
         num_samples = self.buffer.num_samples
         minibatch_size = self.agent_options['minibatch_size']
@@ -106,11 +121,14 @@ class EnergyActorCritic:
         h_factor = self.agent_options['h_factor']
         epsilon = self.agent_options['clipping_factor']
 
-        # Normalize advantages, reset buffer and collect data
+        # Normalize advantages, reset buffer and collect training data
         training_data = self.buffer.collect()
         losses = np.zeros((train_iters, 2), dtype=np.float32)
 
         def next_minibatch():
+            """
+            Fetches the next minibatch.
+            """
             for i in range(0, num_samples, minibatch_size):
                 m = {}
                 for k in self.buffer.dict.keys():
@@ -145,6 +163,10 @@ class EnergyActorCritic:
         return np.mean(losses, axis=0)
 
     class Actor(nn.Module):
+        """
+        Actor network.
+        Given an observation of the environment, predicts an action in the form of a job-node assignment.
+        """
         def __init__(self, observation_size, wait_action):
             super(EnergyActorCritic.Actor, self).__init__()
             self.wait_action = wait_action
@@ -159,7 +181,7 @@ class EnergyActorCritic:
             ).to(DEVICE)
             self.apply(init_weights)
 
-        def forward(self, observation: torch.Tensor, act=None) -> Tuple[Any, Any, Any]:
+        def forward(self, observation: torch.Tensor, act=None) -> tuple:
             mask = torch.where(observation.sum(dim=-1) != 0.0, 1.0, 0.0)
             if self.wait_action:
                 mask[-1] = 1.0
@@ -170,7 +192,10 @@ class EnergyActorCritic:
             action = pi.sample() if act is None else act
             return action, pi.log_prob(action), torch.mean(pi.entropy())
 
-        def loss(self, minibatch: dict, epsilon=0.2):
+        def loss(self, minibatch: dict, epsilon) -> float:
+            """
+            Implements the PPO Clip loss function.
+            """
             obs = minibatch['obs']
             act = minibatch['act']
             adv = minibatch['adv']
@@ -180,10 +205,13 @@ class EnergyActorCritic:
             ratio = torch.exp(logp - logp_old)
             clipped = torch.clip(ratio, 1.0 - epsilon, 1.0 + epsilon) * adv
             loss = -torch.mean(torch.minimum(ratio * adv, clipped))
-
             return loss
 
     class Critic(nn.Module):
+        """
+        Critic network.
+        Given an observation of the environment, predicts the value of the current state.
+        """
         def __init__(self, observation_size):
             super(EnergyActorCritic.Critic, self).__init__()
             self.input = nn.Linear(observation_size[1], 32, device=DEVICE)
@@ -202,7 +230,7 @@ class EnergyActorCritic:
 
         def forward(self, observation: torch.Tensor) -> torch.Tensor:
 
-            # First phase output: dim = (num_batches, all job-node combinations (actions_size))
+            # First phase: reduce from OBSERVATION_SIZE to ACTIONS_SIZE
             out_0_0 = nn.functional.selu(self.input(observation))
             out_0_1 = nn.functional.selu(self.hidden_0_0(out_0_0))
             out_0_2 = nn.functional.selu(self.hidden_0_1(out_0_1))
@@ -210,6 +238,7 @@ class EnergyActorCritic:
             out_0_4 = nn.functional.selu(self.hidden_0_3(out_0_3))
             out_1 = torch.squeeze(out_0_4)
 
+            # Second phase: reduce from ACTIONS_SIZE to a single value
             out_1_1 = nn.functional.selu(self.hidden_1_0(out_1))
             out_1_2 = nn.functional.selu(self.hidden_1_1(out_1_1))
             out_1_3 = nn.functional.selu(self.hidden_1_2(out_1_2))
@@ -219,6 +248,9 @@ class EnergyActorCritic:
             return out
 
         def loss(self, minibatch: dict):
+            """
+            Simple MSE loss.
+            """
             obs = minibatch['obs']
             ret = minibatch['ret']
             if ret.shape[0] != 1:
@@ -229,12 +261,18 @@ class EnergyActorCritic:
 
 
 class PPOBuffer:
-    def __init__(self, observation_size, buffer_size):
+    """
+    Buffer used to collect the training data required to implement Proximal Policy Optimization.
+    """
+    def __init__(self, observation_size, buffer_size, lam, gamma):
         self.start_ptr = 0
         self.curr_ptr = 0
         self.max_size = buffer_size
-        self.total_rewards = 0
+        self.lam = lam
+        self.gamma = gamma
+        self.total_rewards = 0  # For the last trajectory only
 
+        # Initialize arrays
         self.obs = np.zeros((buffer_size, *observation_size))
         self.act = np.zeros(buffer_size)
         self.rew = np.zeros(buffer_size)
@@ -264,23 +302,29 @@ class PPOBuffer:
         if 0 < self.curr_ptr <= self.max_size:
             self.rew[self.curr_ptr - 1] = reward
 
-    def on_end_trajectory(self, gamma, lam, last_reward) -> None:
+    def on_end_trajectory(self, last_reward) -> None:
+        """
+        Stores the last reward of the trajectory and computes the corresponding
+        advantages and expected returns.
+        """
         self.store_past_reward(last_reward)
-        trajectory_slice = slice(self.start_ptr, self.curr_ptr)
 
         # Compute advantages and rewards-to-go
+        trajectory_slice = slice(self.start_ptr, self.curr_ptr)
         rewards = self.rew[trajectory_slice]
         values = self.val[trajectory_slice]
         self.total_rewards = np.sum(rewards)
-        values = np.append(values, 0) # This acts as our mask to avoid taking into account the last value
+
+        # Acts as a mask to avoid taking into account the last value when computing the advantages
+        values = np.append(values, 0)
 
         def discounted_sum(array, discount):
             y = lfilter([1], [1, -discount], x=array[::-1])
             return y[::-1]
 
-        deltas = rewards + (gamma * values[1:]) - values[:-1]
-        advantages = discounted_sum(deltas, gamma * lam)
-        expected_returns = discounted_sum(rewards, gamma)
+        deltas = rewards + (self.gamma * values[1:]) - values[:-1]
+        advantages = discounted_sum(deltas, self.gamma * self.lam)
+        expected_returns = discounted_sum(rewards, self.gamma)
 
         self.adv[trajectory_slice] = advantages
         self.ret[trajectory_slice] = expected_returns
@@ -290,9 +334,9 @@ class PPOBuffer:
 
     def collect(self) -> dict:
         """
-        Reset and normalize advantages
+        Normalizes the advantages and returns the collected samples.
 
-        Returns collected data
+        Returns: a dictionary of tensors containing all the collected samples.
         """
 
         # Normalize advantages
