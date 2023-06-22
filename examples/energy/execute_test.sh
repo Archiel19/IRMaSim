@@ -9,7 +9,7 @@ iters=10
 
 # Input handling
 usage() {
-  printf "Usage: %+18s -d <directory> [-p <train|test>] [-e] [-h]\n" "$0" 1>&2
+  printf "Usage: %+18s -d <directory> [-p <train|test>] [-e] [-i <iters>] [-h]\n" "$0" 1>&2
   printf "%+9sp: phase (default: %s)\n" "-" "$phase" 1>&2
   printf "%+9se: energy agent only (default: %s)\n" "-" "$energy_only" 1>&2
   printf "%+9si: number of simulations to run (default: %d)\n" "-" "$iters" 1>&2
