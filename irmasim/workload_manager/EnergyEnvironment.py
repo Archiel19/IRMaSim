@@ -63,11 +63,11 @@ class EnergyEnvironment:
         self.NUM_NODES = len(self.resources)
         self.NUM_JOBS = env_options["num_jobs"]
         self.OBS_FEATURES = 9
-        wait_action = 1 if self.options["workload_manager"]["wait_action"] else 0
-        self.WAIT_ACTION = self.actions_size[0] - 1 if wait_action else -1
 
         # Observation and action spaces
+        wait_action = 1 if self.options["workload_manager"]["wait_action"] else 0
         self.action_space = spaces.Discrete(self.NUM_JOBS * self.NUM_NODES + wait_action)
+        self.WAIT_ACTION = self.actions_size[0] - 1 if wait_action else -1
         self.observation_space = gym.spaces.Box(low=0.0, high=1.0,
                                                 shape=(self.actions_size[0], self.OBS_FEATURES),
                                                 dtype=np.float32)
