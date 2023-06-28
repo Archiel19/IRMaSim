@@ -42,7 +42,6 @@ class EnergyEnvironment:
 
         # Environment state variables
         self.last_total_energy = 0.0
-        self.last_used_energy = 0.0
         self.last_time = 0.0
         self.pending_jobs = []
 
@@ -62,14 +61,14 @@ class EnergyEnvironment:
         # Constants
         self.NUM_NODES = len(self.resources)
         self.NUM_JOBS = env_options["num_jobs"]
-        self.OBS_FEATURES = 9
+        self.NUM_FEATURES = 9
 
         # Observation and action spaces
         wait_action = 1 if self.options["workload_manager"]["wait_action"] else 0
         self.action_space = spaces.Discrete(self.NUM_JOBS * self.NUM_NODES + wait_action)
         self.WAIT_ACTION = self.actions_size[0] - 1 if wait_action else -1
         self.observation_space = gym.spaces.Box(low=0.0, high=1.0,
-                                                shape=(self.actions_size[0], self.OBS_FEATURES),
+                                                shape=(self.actions_size[0], self.NUM_FEATURES),
                                                 dtype=np.float32)
 
         # Set reward function
@@ -122,7 +121,6 @@ class EnergyEnvironment:
 
     def reset(self) -> None:
         self.last_total_energy = 0.0
-        self.last_used_energy = 0.0
         self.last_time = 0.0
         self.pending_jobs = []
 
@@ -211,10 +209,9 @@ class EnergyEnvironment:
         Should be called every time a reward is computed.
         """
         self.last_total_energy = self.simulator.total_energy
-        self.last_used_energy = self.simulator.used_energy
         self.last_time = self.simulator.simulation_time
 
-    def _energy_consumption_reward(self, last_reward=False) -> float:
+    def _energy_consumption_reward(self) -> float:
         """
         last_reward: may be used to set a different reward for the last time step.
         """
@@ -222,12 +219,12 @@ class EnergyEnvironment:
         self._update_markers()
         return -total_energy_incr
 
-    def _edp_reward(self, last_reward=False) -> float:
+    def _edp_reward(self) -> float:
         """
         last_reward: may be used to set a different reward for the last time step.
         """
         makespan = self.simulator.simulation_time - self.last_time
-        return self._energy_consumption_reward(last_reward) * makespan
+        return self._energy_consumption_reward() * makespan
 
     def _get_action_pair(self, action: int) -> tuple:
         # Job-node pairs can be viewed as a matrix

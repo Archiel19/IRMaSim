@@ -15,7 +15,7 @@ class EnergyWM(WorkloadManager):
     Energy scheduler.
 
     Implements an intelligent actor-critic reinforcement learning agent devoted to minimizing energy consumption
-    or EDP making use of the power specifications of the resources and an enegy estimate.
+    or EDP making use of the power specifications of the resources and an energy estimate.
 
     This class is mainly responsible for coordinating calls between EnergyActorCritic and EnergyEnvironment.
     """
@@ -58,7 +58,7 @@ class EnergyWM(WorkloadManager):
 
     def on_end_trajectory(self):
         logging.getLogger('irmasim').debug(f'{self.simulator.simulation_time} - Ending trajectory')
-        self.agent.on_end_trajectory(self.environment.reward(last_reward=True))
+        self.agent.on_end_trajectory(self.environment.reward())
         self.environment.reset()
         self.trajectory_start = True
 
