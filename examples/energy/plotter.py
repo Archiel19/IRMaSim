@@ -1,7 +1,6 @@
 import argparse as ap
 import matplotlib.pyplot as plt
 
-
 def plot_losses(exp_dir: str, title: str):
     with open(f'{exp_dir}/losses.log', 'r') as l_f:
         losses_pairs = [tuple(map(float, lp.strip().split(','))) for lp in l_f.readlines()]
@@ -13,10 +12,11 @@ def plot_losses(exp_dir: str, title: str):
     else:
         losses = ['Global']
     for i in range(len(losses)):
-        plt.title(f'{title} - {losses[i]} loss')
-        plt.plot([l[i] for l in losses_pairs[1:]])
+        plt.title(f'{title}', pad=20)
+        plt.plot([l[i] for l in losses_pairs])
         plt.xlabel('Simulation')
-        plt.savefig(f'{exp_dir}/{losses[i]}_loss.png')
+        plt.ylabel(f'Average {losses[i]} loss')
+        plt.savefig(f'{exp_dir}/{losses[i]}_loss.png', bbox_inches='tight')
         plt.clf()
 
 
@@ -24,10 +24,11 @@ def plot_rewards(exp_dir: str, title: str):
     with open(f'{exp_dir}/rewards.log', 'r') as r_f:
         rews_pairs = [float(r.strip()) for r in r_f.readlines()]
 
-    plt.title(f'{title} - rewards')
+    plt.title(f'{title}', pad=20)
     plt.xlabel('Simulation')
+    plt.ylabel(f'Average reward')
     plt.plot([r for r in rews_pairs])
-    plt.savefig(f'{exp_dir}/rewards.png')
+    plt.savefig(f'{exp_dir}/rewards.png', bbox_inches='tight')
     plt.clf()
 
 
@@ -56,10 +57,10 @@ def plot_resources(exp_dir: str, title: str):
         loads = [sum(map(lambda l: int(get(l, 'busy_cores')), lines[i:i+chunk_size]))
                  for i in range(1, len(lines), chunk_size)]
 
-    plt.title(f'{title} - cluster load')
+    plt.title(f'{title} - Cluster load', pad=20)
     plt.plot(timestamps, loads)
     plt.axhline(y=max_capacity, linestyle='dashed', color='r')
-    plt.savefig(f'{exp_dir}/resources.png')
+    plt.savefig(f'{exp_dir}/resources.png', bbox_inches='tight')
     plt.clf()
 
 
@@ -78,4 +79,5 @@ if __name__ == '__main__':
     parser.add_argument('-l', '--loss', default=False, action=ap.BooleanOptionalAction)
     parser.add_argument('-r', '--reward', default=False, action=ap.BooleanOptionalAction)
     args = parser.parse_args()
+    plt.rcParams.update({'font.size': 20})
     do_plots(args)

@@ -58,12 +58,15 @@ rm -f {energy,policy,action,low_power,high_gflops,high_cores}/*
 
 # Execution
 if [ "$energy_only" != "true" ]; then
-  HEURISTICS=("low_power" "high_gflops" "high_cores")
+  HEURISTICS=("high_gflops" "high_cores" "high_mem" "high_mem_bw" "random")
   AGENTS=("policy" "energy")
 else
   HEURISTICS=()
   AGENTS=("energy")
 fi
+
+mkdir -p "${HEURISTICS[@]}"
+mkdir -p "${AGENTS[@]}"
 
 for type in "${HEURISTICS[@]}"; do
   printf "\n%s heuristic\n" "$type"
