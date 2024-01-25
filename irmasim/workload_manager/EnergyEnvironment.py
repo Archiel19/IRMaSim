@@ -114,9 +114,9 @@ class EnergyEnvironment:
                     observation[j * self.NUM_NODES + n][i] = val
 
         # Normalize
-        norm_sum = observation.sum()
-        if norm_sum:
-            observation = np.divide(observation, norm_sum)
+        norm = np.linalg.norm(observation)
+        if norm:
+            observation = observation / norm
         return torch.Tensor(observation)
 
     def reset(self) -> None:
