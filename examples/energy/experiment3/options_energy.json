@@ -1,7 +1,7 @@
 {
   "seed": 1024,
   "log_level": "DEBUG",
-  "workload_file": "workload.json",
+  "workload_file": "no_mem_workload.json",
   "platform_file": "platform.json",
   "platform_name": "the_platform",
   "output_dir": "energy",
@@ -16,7 +16,7 @@
     "agent": {
       "swa": true,
       "name": "EnergyActorCritic",
-      "minibatch_size": 60,
+      "minibatch_size": 32,
       "h_factor": 0.0,
       "clipping_factor": 0.1,
       "gamma": 0.99,
@@ -27,7 +27,7 @@
       "train_iters": 50
     }
   },
-  "nbtrajectories": 3,
+  "nbtrajectories": 1,
   "trajectory_length": 180,
   "trajectory_origin": 0
 }
