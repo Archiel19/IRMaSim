@@ -1,0 +1,33 @@
+{
+  "seed": 1024,
+  "log_level": "DEBUG",
+  "workload_file": "workload.json",
+  "platform_file": "platform.json",
+  "platform_name": "the_platform",
+  "output_dir": "energy",
+  "log_resource_type": "Node",
+  "workload_manager": {
+    "type": "EnergyWM",
+    "wait_action": false,
+    "environment": {
+      "objective": "energy_consumption",
+      "num_jobs": 180
+    },
+    "agent": {
+      "swa": true,
+      "name": "EnergyActorCritic",
+      "minibatch_size": 50,
+      "h_factor": 0.0,
+      "clipping_factor": 0.1,
+      "gamma": 0.99,
+      "lambda": 0.95,
+      "lr_pi": 0.001,
+      "lr_v": 0.001,
+      "phase": "train",
+      "train_iters": 50
+    }
+  },
+  "nbtrajectories": 5,
+  "trajectory_length": 90,
+  "trajectory_origin": "random"
+}
